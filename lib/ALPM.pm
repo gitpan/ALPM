@@ -12,14 +12,10 @@ use Carp;
 use ALPM::Package;
 use ALPM::DB;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 require XSLoader;
 XSLoader::load('ALPM', $VERSION);
-
-# Preloaded methods go here.
-
-# Autoload methods go after =cut, and are processed by the autosplit program.
 
 initialize();
 
@@ -34,9 +30,9 @@ my %_IS_GETSETOPTION = ( map { ( $_ => 1 ) }
 my %_IS_GETOPTION    = ( %_IS_GETSETOPTION,
                          map { ( $_ => 1 ) } qw/ lockfile localdb syncdbs / );
 
-####
+####----------------------------------------------------------------------
 #### CLASS FUNCTIONS
-####
+####----------------------------------------------------------------------
 
 sub import
 {
@@ -46,24 +42,33 @@ sub import
     my ($class) = shift;
 
     if ( @_ == 1) {
-        my $opts_ref = shift;
-        croak q{A single argument to ALPM's import must be a hash reference}
-            unless ( ref $opts_ref eq 'HASH' );
-        $class->set_options($opts_ref);
+        my $arg = shift;
+        if ( ! ref $arg ) {
+            $class->load_config($arg);
+        }
+        elsif ( ref $arg eq 'HASH' ) {
+            $class->set_options($arg);
+
+        }
+        else {
+            croak q{A single argument to ALPM's import must be
+a hash ref or path to a pacman.conf file};
+        }
+
+        return;
     }
 
     croak qq{Options to ALPM's import does not appear to be a hash}
         unless ( @_ % 2 == 0 );
 
-    my %options = @_;
     $class->set_options( { @_ } );
 
     return;
 }
 
-####
+####----------------------------------------------------------------------
 #### CLASS METHODS
-####
+####----------------------------------------------------------------------
 
 sub get_opt
 {
@@ -77,7 +82,8 @@ sub get_opt
 
     my $result = eval { $func_ref->() };
     if ($EVAL_ERROR) {
-        # For ALPM errors, show the line number of the calling script...
+        # For ALPM errors, show the line number of the calling script, not
+        # the line number of this module...
         croak $1 if ( $EVAL_ERROR =~ /^(ALPM .*) at .*? line \d+[.]$/ );
         croak $EVAL_ERROR;
     }
@@ -103,10 +109,12 @@ sub set_opt
     # If the option is a plural, it can accept multiple arguments
     # and must take an arrayref as argument...
     $func_arg = ( $optname =~ /s$/            ?
+                  # is multivalue opt
                   ( ref $optval eq 'ARRAY'      ?
                     $optval                     :
-                    ( [ $optval, @_[ 3 .. $#_ ] ] )
+                    ( [ $optval, @_[ 3 .. $#_ ] ] ) # auto-convert args to aref
                    )                          :
+                  # is single valued opt
                   ( ! ref $optval                 ?
                     $optval                       :
                     croak qq{Singular option "$optname" only takes a scalar value}
@@ -158,25 +166,46 @@ sub register_db
 {
     my $class = shift;
 
-    if ( @_ == 0 ) {
+    if ( @_ == 0 || $_[0] eq 'local' ) {
         return db_register_local();
     }
 
-    my $sync_name = shift;
-
-    return db_register_local() if ( $sync_name eq 'local' );
-
-    my $sync_url = shift;
+    my ($sync_name, $sync_url) = @_;
 
     croak 'You must supply a URL for the database'
         unless ( defined $sync_url );
 
+    # Replace the literal string '$repo' with the repo's name,
+    # like in the pacman config file... bad idea maybe?
     $sync_url =~ s/\$repo/$sync_name/g;
+
+    # Set the server right away because function calls break in between...
     my $new_db = db_register_sync($sync_name);
     $new_db->_set_server($sync_url);
     return $new_db;
 }
 
+sub get_repo_db
+{
+    croak 'Not enough arguments to get_repo_dbs' if ( @_ < 2 );
+    my ($class, $repo_name) = @_;
+
+    my ($found) = grep { $_->get_name eq $repo_name } @{ALPM->get_opt('syncdbs')};
+    return $found;
+}
+
+sub load_config
+{
+    my ($class, $cfg_path) = @_;
+
+    require ALPM::LoadConfig;
+    my $loader = ALPM::LoadConfig->new;
+    eval { $loader->load_file($cfg_path) };
+
+    croak $EVAL_ERROR . "Config file parse error" if ($EVAL_ERROR);
+
+    return 1;
+}
 
 1;
 
@@ -236,6 +265,22 @@ None.
 Because all alpm functions have been converted to class methods,
 classes, and object methods, nothing is exported.
 
+=head2 IMPORT OPTIONS
+
+There are a few different options you can specify after c<use ALPM>.
+These help to set configuration options for ALPM.  These options are
+global for everyone who is using the module.  You can specify either:
+
+=over
+
+=item 1. The path to a pacman.conf configuration file
+
+=item 2. A hashref of options to use for ALPM
+
+=item 3. A hash of options to use for ALPM
+
+=back
+
 =head1 OPTIONS
 
 ALPM has a number of options corresponding to the
@@ -279,6 +324,16 @@ package or database-specific functions.
   Precond : You must set options before using register_db.
   Throws  : An 'ALPM DB Error: ...' message is croaked on errors.
   Returns : An ALPM::DB object.
+
+=head2 load_pkgfile
+
+  Params  : The path to a package tarball.
+  Returns : An ALPM::Package object.
+
+=head2 load_config
+
+  Params  : The path to a pacman.conf configuration file.
+  Returns : Nothing.
 
 =head1 SEE ALSO
 
