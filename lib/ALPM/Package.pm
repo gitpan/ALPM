@@ -63,3 +63,174 @@ sub get_attribs
 }
 
 1;
+
+=head1 NAME
+
+ALPM::Package - Class representing an alpm package
+
+=head1 SYNOPSIS
+
+  use ALPM qw( /etc/pacman.conf );
+  my $perlpkg = ALPM->local_db->get_pkg('perl');
+
+  # TMTOWTDI!
+
+  my $name = $perlpkg->get_name();
+  print "$name rocks!\n";
+
+  print $perlpkg->get_attr('name'), " rocks!\n";
+
+  my %attrs = $perlpkg->get_attribs();
+  print "$attrs{name} rocks!\n";
+
+  my $attrs_ref = $perlpkg->get_attribs_ref();
+  print "attrs_ref->{name} rocks!\n";
+
+  # Dependencies are given as array of hashrefs:
+  print "$name depends on:\n";
+  for my $dep ( @{ $perlpkg->get_depends() } ) {
+      print "\t$dep->{name} $dep->{mod} $dep->{ver}\n";
+  }
+
+  # Others lists are arrayrefs of scalars:
+  print "$name owns files:\n";
+  for my $file ( @{ $perlpkg->get_files() } ) {
+      print "\t$file\n";
+  }
+
+=head1 DESCRIPTION
+
+This class is a wrapper for all of the C<alpm_pkg_...> C library functions
+of libalpm.  You retrieve the package from the database and you can then
+access its attributes.  Attributes are like L<ALPM>'s options.  There are
+many different ways to access them.  Yet you cannot modify a package
+using its methods.
+
+=head1 ATTRIBUTES
+
+There are three basic ways to access an attribute.  You can use the
+accessor method that is specific to an attribute, you can use the
+C<get_attr> method, or you can use the C<get_attribs> method.
+
+=head2 ATTRIBUTE ACCESSORS
+
+The accessors are named exactly the same as the C<alpm_pkg_get...>
+functions.  They are easy to use if you only want a few attributes.
+
+=over
+
+=item * get_filename
+
+=item * get_name
+
+=item * get_version
+
+=item * get_desc
+
+=item * get_url
+
+=item * get_builddate
+
+=item * get_installdate
+
+=item * get_packager
+
+=item * get_md5sum
+
+=item * get_arch
+
+=item * get_size
+
+=item * get_isize
+
+=item * get_reason
+
+=item * get_licenses
+
+=item * get_groups
+
+=item * get_depends
+
+=item * get_optdepends
+
+=item * get_conflicts
+
+=item * get_provides
+
+=item * get_deltas
+
+=item * get_replaces
+
+=item * get_files
+
+=item * get_backup
+
+=item * has_scriptlet
+
+=item * has_force
+
+=item * download_size
+
+=back
+
+Attributes with plural names return an arrayref of strings.
+
+get_depends is different because it returns an arrayref of hashrefs
+(an AoH).  The hash has the following key-value pairs:
+
+  |------+----------------------------------------|
+  | Key  | Value                                  |
+  |------+----------------------------------------|
+  | name | Package name of the dependency         |
+  | ver  | The version to compare the real one to |
+  | mod  | The modifier of the dependency         |
+  |      | ('==', '>=', '<=', '<', or '>')        |
+  |------+----------------------------------------|
+
+=head2 PERLISH METHODS
+
+There are also more perlish ways to get attributes.  C<get_attr> is useful
+if you have the name of the attribute in a scalar.  C<get_attribs> is useful
+if you want to get all attributes at once in a hash, or many attributes
+at once into a list or variables.
+
+=head2 get_attr
+
+  Usage   : my $name = $pkg->get_attr('name');
+  Params  : The name of the attribute.
+            (use 'name' to call get_name, etc.
+             use 'scriplet' to call has_scriptlet, etc.
+             'download_size' is unchanged)
+  Returns : The attribute value.
+
+=head2 get_attribs
+
+  Usage   : my %attribs = $pkg->get_attribs();
+            my ($name, $desc) = $pkg->get_attribs('name', 'desc');
+  Params  : If you specify attribute names, their values are returned as
+            a list.  Otherwise, returns a hash of all attributes.
+  Returns : Either a hash or a list.
+
+=head2 get_attribs_ref
+
+  This is the same as get_attribs, but it returns a hashref or
+  arrayref instead.
+
+=head1 SEE ALSO
+
+L<ALPM>, L<ALPM::DB>
+
+=head1 AUTHOR
+
+Justin Davis, C<< <jrcd83 at gmail dot com> >>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2009 by Justin Davis
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.10.0 or,
+at your option, any later version of Perl 5 you may have available.
+
+=cut
+

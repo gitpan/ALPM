@@ -19,8 +19,8 @@ my %_CFG_OPTS =
         NoExtract noextracts NoPassiveFtp nopassiveftp };
 
 my $COMMENT_MATCH = qr/ \A \s* [#] /xms;
-my $SECTION_MATCH = qr/ \A \s* [[] (\w+) []] \z /xms;
-my $FIELD_MATCH   = qr/ \A \s* (\w+) \s* = \s* ([^\n]+) \z /xms;
+my $SECTION_MATCH = qr/ \A \s* [[] (\w+) []] \s* \z /xms;
+my $FIELD_MATCH   = qr/ \A \s* (\w+) \s* = \s* ([^\n]+) /xms;
 
 ####----------------------------------------------------------------------
 #### PRIVATE FUNCTIONS
@@ -68,7 +68,8 @@ sub _make_parser
 
             # Print the offending file and line number along with any errors...
             # (This is why we use dies with newlines, for cascading error msgs)
-            die "$EVAL_ERROR$path:${\$cfg_file->input_line_number()} $line\n" if ($EVAL_ERROR);
+            die "$EVAL_ERROR$path:${\$cfg_file->input_line_number()} $line\n"
+                if ($EVAL_ERROR);
         };
 
     return
@@ -131,10 +132,11 @@ sub load_file
     my $field_hooks =
     {
      ( map {
-         my $field_name = $_;        # these must be copied to new vars
+         my $field_name = $_;
          my $opt_name   = $_CFG_OPTS{$_};
-         $_ => ( $opt_name =~ /s$/ ? # create hash of field names to hooks
-                 sub {
+         # create hash of field names to hooks
+         $_ => ( $opt_name =~ /s$/ ? 
+                 sub { # plural options get set arrayref values
                      my $cfg_value = shift;
                      die "$field_name can only be set in the [options] section\n"
                          unless ( $current_section eq 'options' );
@@ -142,7 +144,7 @@ sub load_file
                      ALPM->set_opt( $opt_name, [ split /\s+/, $cfg_value ] );
                  }
                  :
-                 sub {
+                 sub { # singular options get scalar values
                      my $cfg_value = shift;
                      die "$field_name can only be set in the [options] section\n"
                          unless ( $current_section eq 'options' );
@@ -190,5 +192,48 @@ sub load_file
     _set_defaults();
 
     my $parser_ref = _make_parser( $cfg_path, $parser_hooks );
-    return $parser_ref->();
+    my $ret = $parser_ref->();
+
+    if ( $ret ) { ALPM->register_db; } # registe local db
+    return $ret;
 }
+
+1;
+
+__END__
+
+=head1 NAME
+
+ALPM::LoadConfig - pacman.conf config file parser
+
+=head1 SYNOPSIS
+
+  # At startup:
+  use ALPM qw( /etc/pacman.conf );
+
+  # At runtime:
+  ALPM->load_config('/etc/pacman.conf');
+
+=head1 DESCRIPTION
+
+This class is used internally by ALPM to parse pacman.conf config
+files.  The settings are used to set ALPM options.  You don't need to
+use this module directly.
+
+=head1 SEE ALSO
+
+L<ALPM>
+
+=head1 AUTHOR
+
+Justin Davis, C<< <jrcd83 at gmail dot com> >>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2009 by Justin Davis
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.10.0 or,
+at your option, any later version of Perl 5 you may have available.
+
+=cut

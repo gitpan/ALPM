@@ -1,28 +1,21 @@
----
-name: ALPM
-version: 0.02
+--- #YAML:1.0
+name:               ALPM
+version:            0.03
+abstract:           XS module, OO wrapper of libalpm, Archlinux's packaging system
 author:
-  - 'Justin Davis <jrcd83@gmail.com>'
-abstract: "Perl OO version of libalpm, Archlinux's packaging system"
-license: perl
-resources:
-  license: http://dev.perl.org/licenses/
+    - Justin Davis <jrcd at gmail dot com>
+license:            unknown
+distribution_type:  module
+configure_requires:
+    ExtUtils::MakeMaker:  0
 build_requires:
-  ExtUtils::CBuilder: 0
-  Test::More: 0
-provides:
-  ALPM:
-    file: lib/ALPM.pm
-    version: 0.02
-  ALPM::DB:
-    file: lib/ALPM/DB.pm
-  ALPM::LoadConfig:
-    file: lib/ALPM/LoadConfig.pm
-  ALPM::Package:
-    file: lib/ALPM/Package.pm
-  ALPM::PackageFree:
-    file: lib/ALPM/PackageFree.pm
-generated_by: Module::Build version 0.280801
+    ExtUtils::MakeMaker:  0
+requires:  {}
+no_index:
+    directory:
+        - t
+        - inc
+generated_by:       ExtUtils::MakeMaker version 6.52
 meta-spec:
-  url: http://module-build.sourceforge.net/META-spec-v1.2.html
-  version: 1.2
+    url:      http://module-build.sourceforge.net/META-spec-v1.4.html
+    version:  1.4
