@@ -204,34 +204,18 @@ T_ALPM_PACKAGEFREE
         croak( "ALPM Package Error: %s", alpm_strerror( pm_errno ));
     sv_setref_pv( $arg, \"ALPM::PackageFree\", (void *)$var );
 
+T_ALPM_GROUP
+    if ( $var == NULL )
+        croak( "ALPM DB Error: %s", alpm_strerror( pm_errno ));
+    sv_setref_pv( $arg, \"ALPM::Group\", (void *)$var );
+
+
 L_STRING_FREE
-    $arg = newRV_noinc((SV *)newAV());
-    {
-        AV *string_array = (AV *) SvRV($arg);
-        StringListFree iter;
-        alpm_list_t *list;
-        iter = $var;
-        list = (alpm_list_t *) iter;
-        while ( iter != NULL ) {
-            SV *string = newSVpv( iter->data, strlen( iter->data ) );
-            av_push( string_array, string );
-            iter = iter->next;
-        }
-        FREELIST( list );
-    }
+    $arg = convert_stringlist( (alpm_list_t *)$var );
+    FREELIST( $var );
 
 L_STRING_NOFREE
-    $arg = newRV_noinc((SV *)newAV());
-    {
-        AV *string_array = (AV *) SvRV($arg);
-        StringListFree iter;
-        iter = $var;
-        while ( iter != NULL ) {
-            SV *string = newSVpv( iter->data, strlen( iter->data ) );
-            av_push( string_array, string );
-            iter = iter->next;
-        }
-    }
+    $arg = convert_stringlist( (alpm_list_t *)$var );
 
 L_DATABASE
     $arg = newRV_noinc( (SV *) newAV() );
@@ -285,38 +269,8 @@ L_DEPEND
         AV *depend_array = (AV*) SvRV($arg);
         DependList iter = $var;
         while ( iter != NULL ) {
-            HV *depend;
-            SV *depend_ref, *hash_value;
-            pmdepend_t *ampl_dep;
-            pmdepmod_t depmod;
-
-            depend      = newHV();
-            depend_ref  = newRV_noinc((SV*) depend);
-            ampl_dep = (pmdepend_t *)iter->data;
-
-            hash_value  = newSV(0);
-            sv_setpv( hash_value, ampl_dep->name );
-            hv_store( depend, \"name\", 4, hash_value, 0 );
-
-            if ( ampl_dep->version != NULL ) {
-                hash_value  = newSV(0);
-                sv_setpv( hash_value, ampl_dep->version );
-                hv_store( depend, \"version\", 7, hash_value, 0 );
-            }
-
-            depmod = ampl_dep->mod;
-            if ( depmod != 1 ) {
-                hash_value  = newSV(0);
-                sv_setpv( hash_value, ( depmod == 2 ? \"==\"  :
-                                        depmod == 3 ? \">=\"  :
-                                        depmod == 4 ? \"<=\"  :
-                                        depmod == 5 ? \">\"   :
-                                        depmod == 6 ? \"<\"   :
-                                        \"ERROR\" ));
-                hv_store( depend, \"mod\", 3, hash_value, 0 );
-            }
-                
-            av_push( depend_array, depend_ref );
+            av_push( depend_array,
+                     convert_depend( (pmdepend_t *)iter->data ) );
             iter = iter->next;
         }
     }

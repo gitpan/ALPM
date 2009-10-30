@@ -1,21 +1,22 @@
 package ALPM;
 
-use 5.010000;
+#use 5.010000;
 use strict;
 use warnings;
 
 require Exporter;
 use AutoLoader;
-use English qw(-no_match_vars);
+
 use Scalar::Util qw(weaken);
-use Carp;
+use English      qw(-no_match_vars);
+use Carp         qw(carp croak confess);
 
 use ALPM::Transaction;
 use ALPM::Package;
 use ALPM::PackageFree;
 use ALPM::DB;
 
-our $VERSION   = '0.03';
+our $VERSION   = '0.04';
 #our @EXPORT    = qw();
 #our @EXPORT_OK = qw($ALPM);
 
@@ -46,18 +47,20 @@ sub AUTOLOAD {
 require XSLoader;
 XSLoader::load('ALPM', $VERSION);
 
+
 ####----------------------------------------------------------------------
 #### GLOBAL VARIABLES
 ####----------------------------------------------------------------------
+
 
 # Transaction global variable
 our $_Transaction;
 
 our %_IS_GETSETOPTION = ( map { ( $_ => 1 ) }
                           qw{ root dbpath cachedirs logfile usesyslog
-                              noupgrades noextracts ignorepkgs holdpkgs ignoregrps
-                              xfercommand nopassiveftp
-                              logcb dlcb totaldlcb } );
+                              noupgrades noextracts ignorepkgs ignoregrps
+
+                              nopassiveftp logcb dlcb totaldlcb fetchcb } );
 
 our %_IS_GETOPTION    = ( %_IS_GETSETOPTION,
                          map { ( $_ => 1 ) } qw/ lockfile localdb syncdbs / );
@@ -80,24 +83,28 @@ my %_TRANS_FLAGS = ( 'nodeps'      => PM_TRANS_FLAG_NODEPS(),
                      'dlonly'      => PM_TRANS_FLAG_DOWNLOADONLY(),
                      'noscriptlet' => PM_TRANS_FLAG_NOSCRIPTLET(),
                      'noconflicts' => PM_TRANS_FLAG_NOCONFLICTS(),
-                     'printuris'   => PM_TRANS_FLAG_PRINTURIS(),
                      'needed'      => PM_TRANS_FLAG_NEEDED(),
                      'allexplicit' => PM_TRANS_FLAG_ALLEXPLICIT(),
                      'unneeded'    => PM_TRANS_FLAG_UNNEEDED(),
-                     'recurseall'  => PM_TRANS_FLAG_RECURSEALL()
+                     'recurseall'  => PM_TRANS_FLAG_RECURSEALL(),
+                     'nolock'      => PM_TRANS_FLAG_NOLOCK(),
                     );
+
 
 ####----------------------------------------------------------------------
 #### CLASS INIT
 ####----------------------------------------------------------------------
 
+
 initialize();
 
 END { release() };
 
+
 ####----------------------------------------------------------------------
 #### CLASS FUNCTIONS
 ####----------------------------------------------------------------------
+
 
 sub import
 {
@@ -125,19 +132,28 @@ END_ERROR
     return;
 }
 
+
 ####----------------------------------------------------------------------
 #### CLASS METHODS
 ####----------------------------------------------------------------------
+
 
 sub get_opt
 {
     croak 'Invalid arguments to get_opt' if ( @_ != 2 );
     my ($class, $optname) = @_;
 
-    croak qq{Unknown libalpm option "$optname"} unless ( $_IS_GETOPTION{$optname} );
+    croak 'Option name must be provided'
+        unless defined $optname;
 
-    my $method_name = "get_$optname";
+    croak qq{Unknown libalpm option "$optname"}
+        unless ( $_IS_GETOPTION{$optname} );
+
+    my $method_name = "alpm_option_get_$optname";
     my $func_ref = $ALPM::{$method_name};
+
+    die "Internal error: $method_name should be defined in ALPM.xs"
+        unless defined $func_ref;
 
     my $result = eval { $func_ref->() };
     if ($EVAL_ERROR) {
@@ -155,32 +171,51 @@ sub set_opt
     croak 'Not enough arguments to set_opt' if ( @_ < 3 );
     my ($class, $optname, $optval) = @_;
 
+    croak 'Option name must be provided'
+        unless defined $optname;
+
     $optname = lc $optname;
     unless ( $_IS_GETSETOPTION{$optname} ) {
         carp qq{Given option "$optname" is not settable or unknown};
         return;
     }
 
-    my $method_name = "set_$optname";
+    my $method_name = "alpm_option_set_$optname";
     my $func_ref = $ALPM::{$method_name};
+
+    die "Internal error: $method_name should be defined in ALPM.xs"
+        unless defined $func_ref;
+
     my $func_arg;
 
     # If the option is a plural, it can accept multiple arguments
     # and must take an arrayref as argument...
-    $func_arg = ( $optname =~ /s$/            ?
-                  # is multivalue opt
-                  ( ref $optval eq 'ARRAY'      ?
-                    $optval                     :
-                    ( [ $optval, @_[ 3 .. $#_ ] ] ) # auto-convert args to aref
-                   )                          :
-                  # is single valued opt
-                  ( ref $optval eq '' || ref $optval eq 'CODE' ?
-                    $optval                                    :
-                    croak qq{Singular option "$optname" only takes a scalar value}
-                   )
-                 );
+    if ( substr( $optname, -1 ) eq 's'  ) {
+        $func_arg = ( ! defined $optval
+                      ? [ ] # XSUB must have an array ref
+                      : ref $optval eq 'ARRAY'
+                      ? $optval
+                      # auto-convert args to aref
+                      : ( [ $optval, @_[ 3 .. $#_ ] ] ));
+    }
+    else {
+        $func_arg = $optval;
+    }
 
-    return $func_ref->($func_arg);
+    # I think the XSUB checks this for us.
+    #
+    # else {
+    #     # is single valued opt
+    #     croak qq{Singular option "$optname" only takes a scalar value}
+    #         unless ( ! ref $optval || ref $optval eq 'CODE' );
+    # }
+
+    eval { $func_ref->($func_arg) };
+
+    if ( $EVAL_ERROR ) {
+        $EVAL_ERROR =~ s/ at .*? line \d+[.]\n//;
+        croak $EVAL_ERROR;
+    }
 }
 
 sub get_options
@@ -222,7 +257,11 @@ sub set_options
     }
 
     for my $optname ( keys %options ) {
-        $class->set_opt( $optname, $options{$optname} );
+        eval { $class->set_opt( $optname, $options{$optname} ) };
+        if ( $EVAL_ERROR ) {
+            $EVAL_ERROR =~ s/ at .*? line \d+\n//;
+            croak "$EVAL_ERROR (for $optname)";
+        }
     }
 
     return 1;
@@ -233,7 +272,7 @@ sub register_db
     my $class = shift;
 
     if ( @_ == 0 || $_[0] eq 'local' ) {
-        return $class->local_db;
+        return $class->localdb;
     }
 
     my ($sync_name, $sync_url) = @_;
@@ -247,25 +286,56 @@ sub register_db
 
     # Set the server right away because function calls break in between...
     my $new_db = db_register_sync($sync_name);
-    $new_db->_set_server($sync_url);
+    $new_db->set_server($sync_url);
     return $new_db;
 }
 
-sub local_db
+*register = \&register_db;
+
+sub localdb
 {
     my $class = shift;
     my $localdb = $class->get_opt('localdb');
+
     return $localdb if $localdb;
     return db_register_local();
 }
 
-sub get_repo_db
+sub syncdbs
 {
-    croak 'Not enough arguments to get_repo_dbs' if ( @_ < 2 );
+    my $class = shift;
+    my $syncdbs = $class->get_opt('syncdbs');
+    return @$syncdbs;
+}
+
+sub databases
+{
+    my $class = shift;
+    return ( $class->localdb, $class->syncdbs );
+}
+*dbs = \&databases;
+
+sub repodb
+{
+    croak 'Not enough arguments to ALPM::repodb()' if ( @_ < 2 );
     my ($class, $repo_name) = @_;
 
-    my ($found) = grep { $_->get_name eq $repo_name } @{ALPM->get_opt('syncdbs')};
+    my ($found) = grep { $_->name eq $repo_name } $class->databases;
     return $found;
+}
+*db = \&repodb;
+
+sub search
+{
+    my ($class, @search_strs) = @_;
+
+    return ( map { $_->search( @search_strs ) } $class->databases );
+}
+
+sub unregister_all_dbs
+{
+    # Ignore our args since this should be called as a class method.
+    alpm_db_unregister_all();
 }
 
 sub load_config
@@ -281,53 +351,90 @@ sub load_config
     return 1;
 }
 
+sub load_pkgfile
+{
+    croak 'load_pkgfile() must have at least a filename as argument'
+        if ( @_ < 1 );
+
+    if ( eval { $_[0]->isa( __PACKAGE__ ) } ) {
+        shift @_;
+    }
+
+    my $package_path = shift;
+    return alpm_pkg_load( $package_path );
+}
+
 sub transaction
 {
-    croak 'transaction must be called as a class method' unless ( @_ );
+    croak 'transaction() must be called as a class method' unless ( @_ );
     my $class = shift;
 
     croak 'arguments to transaction method must be a hash'
         unless ( @_ % 2 == 0 );
 
     my %trans_opts = @_;
-    my ($trans_type, $trans_flags) = (0) x 2;
+    my ($trans_type, $trans_flags, $enable_downgrade) = (0) x 3;
+    my $sysupgrade;
 
     # A type must be specified...
-    croak qq{unknown transaction type "$trans_type"}
-        unless exists $_TRANS_TYPES{ $trans_opts{type} };
-    $trans_type = $_TRANS_TYPES{ $trans_opts{type} };
+    croak q{you must specify a 'type' in the hash arguments}
+        unless $trans_opts{type};
+
+    # Transactions of type sysupgrade use the alpm_trans_sysupgrade() func.
+    # We try to hide this difference with the same interface as normal
+    # transactions.
+    if ( $trans_opts{type} eq 'sysupgrade' ) {
+        $sysupgrade = 1;
+        $trans_opts{type} = 'sync';
+
+        if ( exists $trans_opts{flags} ) {
+            my @orig_flags = split /\s+/, $trans_opts{flags};
+            my @pruned_flags = grep { !/^(?:enable_)?downgrade$/ } @orig_flags;
+            if ( scalar @pruned_flags != scalar @orig_flags ) {
+                $enable_downgrade = 1;
+                $trans_opts{flags} = join ' ', @pruned_flags;
+            }
+        }
+    }
+
+    $trans_type = $_TRANS_TYPES{ $trans_opts{type} }
+        or croak qq{unknown transaction type "$trans_type"};
 
     # Parse flags if they are provided...
     if ( exists $trans_opts{flags} ) {
-        croak qq{transaction() option 'flags' must be an arrayref}
-            unless ( ref $trans_opts{flags} ne 'ARRAY' );
-
-        for my $flag ( @{ $trans_opts{flags} } ) {
+        for my $flag ( split /\s+/, $trans_opts{flags} ) {
             croak qq{unknown transaction flag "$flag"}
                 unless exists $_TRANS_FLAGS{$flag};
             $trans_flags |= $_TRANS_FLAGS{$flag};
         }
     }
 
-    eval { alpm_trans_init( $trans_type, $trans_flags,
-                            $trans_opts{event} ) };
-    if ( $@ ) {
-        die "$@\n" unless ( $@ =~ /\AALPM Error:/ );
-        $@ =~ s/ at .*? line \d+[.]\n//;
-        croak $@;
+    eval {
+        alpm_trans_init( $trans_type, $trans_flags,
+                         $trans_opts{event},
+                         $trans_opts{conv},
+                         $trans_opts{progress});
+        alpm_trans_sysupgrade( $enable_downgrade ) if ( $sysupgrade );
+    };
+    if ( $EVAL_ERROR ) {
+        die "$EVAL_ERROR\n" unless ( $EVAL_ERROR =~ /\AALPM Error:/ );
+        $EVAL_ERROR =~ s/ at .*? line \d+[.]\n//;
+        croak $EVAL_ERROR;
     }
 
-    # Return an object that will automatically release the transaction
+    # Create an object that will automatically release the transaction
     # when destroyed...
     my $t = ALPM::Transaction->new( %trans_opts );
-    $_Transaction = $t;
-    weaken $_Transaction; # keep track of active transactions
+    $_Transaction = $t;   # keep track of active transactions
+    weaken $_Transaction;
     return $t;
 }
+
 
 ####----------------------------------------------------------------------
 #### TIED HASH INTERFACE
 ####----------------------------------------------------------------------
+
 
 my @_OPT_NAMES = sort keys %ALPM::_IS_GETOPTION;
 
@@ -349,7 +456,8 @@ sub EXISTS
 
 sub DELETE
 {
-    croak 'You cannot delete keys in this tied hash';
+    my ($self, $key) = @_;
+    $self->set_opt( $key, undef );
 }
 
 sub CLEAR

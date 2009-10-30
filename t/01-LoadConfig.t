@@ -2,13 +2,14 @@
 use Test::More tests => 4;
 use warnings;
 use strict;
-use Devel::Peek;
+
+#use Devel::Peek;
 
 BEGIN {
     use_ok('ALPM');
 };
 
-ok( ALPM->load_config('t/fakeroot/etc/pacman.conf') );
+ok( ALPM->load_config('/etc/pacman.conf') );
 ok( my $local = ALPM->register_db );
 ok( my $dbs = ALPM->get_opt('syncdbs') );
 

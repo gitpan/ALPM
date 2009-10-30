@@ -24,6 +24,13 @@ struct __pmdepend_t {
 	char *version;
 };
 
+struct __pmdepmissing_t {
+	char *target;
+	pmdepend_t *depend;
+	char *causingpkg; /* this is used in case of remove dependency error only */
+};
+typedef struct __pmdepmissing_t pmdepmissing_t;
+
 /* from group.h */
 struct __pmgrp_t {
 	/*group name*/
@@ -39,11 +46,29 @@ struct __pmsyncpkg_t {
 	alpm_list_t *removes;
 };
 
+/* from conflicts.h */
+
+struct __pmconflict_t {
+    char *package1;
+    char *package2;
+};
+typedef struct __pmconflict_t pmconflict_t;
+
+struct __pmfileconflict_t {
+    char *target;
+    pmfileconflicttype_t type;
+    char *file;
+    char *ctarget;
+};
+
 typedef int           negative_is_error;
 typedef pmdb_t      * ALPM_DB;
 typedef pmpkg_t     * ALPM_Package;
 typedef pmpkg_t     * ALPM_PackageFree;
 typedef pmgrp_t     * ALPM_Group;
+
+typedef pmdepend_t  * DependHash;
+typedef pmconflict_t * ConflictArray;
 
 typedef alpm_list_t * StringListFree;
 typedef alpm_list_t * StringListNoFree;
@@ -54,15 +79,212 @@ typedef alpm_list_t * DatabaseList;
 typedef alpm_list_t * DependList;
 typedef alpm_list_t * ListAutoFree;
 
+/* CONVERTER FUNCTIONS ******************************************************/
+
+/* These all convert C data structures to their Perl counterparts */
+
+static SV * convert_stringlist ( alpm_list_t * string_list )
+{
+    AV *string_array = newAV();
+    alpm_list_t *iter;
+    for ( iter = string_list; iter; iter = iter->next ) {
+        SV *string = newSVpv( iter->data, strlen( iter->data ) );
+        av_push( string_array, string );
+    }
+    return newRV_noinc( (SV *)string_array );
+}
+
+static SV * convert_depend ( const pmdepend_t * depend )
+{
+    HV *depend_hash;
+    SV *depend_ref;
+    pmdepmod_t depmod;
+
+    depend_hash = newHV();
+    depend_ref  = newRV_inc( (SV *)depend_hash );
+        
+    hv_store( depend_hash, "name", 4, newSVpv( depend->name, 0 ), 0 );
+    
+    if ( depend->version != NULL ) {
+        hv_store( depend_hash, "version", 7, newSVpv( depend->version, 0 ), 0 );
+    }
+    
+    depmod = depend->mod;
+    if ( depmod != 1 ) {
+        hv_store( depend_hash, "mod", 3,
+                  newSVpv( ( depmod == 2 ? "==" :
+                             depmod == 3 ? ">=" :
+                             depmod == 4 ? "<=" :
+                             depmod == 5 ? ">"  :
+                             depmod == 6 ? "<"  :
+                             "ERROR" ), 0 ),
+                  0 );
+    }
+
+    return depend_ref;
+}
+
+static SV * convert_depmissing ( const pmdepmissing_t * depmiss )
+{
+    HV *depmiss_hash;
+
+    depmiss_hash = newHV();
+    hv_store( depmiss_hash, "target", 6,
+              newSVpv( depmiss->target, 0 ), 0 );
+    hv_store( depmiss_hash, "cause", 5,
+              newSVpv( depmiss->causingpkg, 0 ), 0 );
+    hv_store( depmiss_hash, "depend", 6,
+              convert_depend( depmiss->depend ), 0 );
+    return newRV_inc( (SV *)depmiss_hash );
+}
+
+static SV * convert_conflict ( const pmconflict_t * conflict )
+{
+    AV *conflict_list;
+
+    conflict_list = newAV();
+    av_push( conflict_list, newSVpv( conflict->package1, 0 ) );
+    av_push( conflict_list, newSVpv( conflict->package2, 0 ) );
+    return newRV_inc( (SV *)conflict_list );
+}
+
+static SV * convert_fileconflict ( const pmfileconflict_t * fileconflict )
+{
+    HV *conflict_hash;
+
+    conflict_hash = newHV();
+    hv_store( conflict_hash, "type", 4,
+              newSVpv( ( fileconflict->type == PM_FILECONFLICT_TARGET ?
+                         "target" :
+                         fileconflict->type == PM_FILECONFLICT_FILESYSTEM ?
+                         "filesystem" : "ERROR" ), 0 ), 0);
+    hv_store( conflict_hash, "target", 6, newSVpv( fileconflict->target, 0 ),
+              0 );
+    hv_store( conflict_hash, "file", 4, newSVpv( fileconflict->file, 0 ),
+              0 );
+    hv_store( conflict_hash, "ctarget", 7, newSVpv( fileconflict->ctarget, 0 ),
+              0 );
+
+    return newRV_inc( (SV *)conflict_hash );
+}
+
+void free_stringlist_errors ( char *string )
+{
+    free(string);
+}
+
+/* Copy/pasted from ALPM's conflict.c */
+void free_fileconflict_errors ( pmfileconflict_t *conflict )
+{
+	if ( strlen( conflict->ctarget ) > 0 ) {
+		free(conflict->ctarget);
+	}
+	free(conflict->file);
+	free(conflict->target);
+	free(conflict);
+}
+
+/* Copy/pasted from ALPM's deps.c */
+void free_depmissing_errors ( pmdepmissing_t *miss )
+{
+	free(miss->depend->name);
+	free(miss->depend->version);
+	free(miss->depend);
+
+	free(miss->target);
+	free(miss->causingpkg);
+	free(miss);
+}
+
+/* Copy/pasted from ALPM's conflict.c */
+void free_conflict_errors ( pmconflict_t *conflict )
+{
+	free(conflict->package2);
+	free(conflict->package1);
+	free(conflict);
+}
+
+static SV * convert_trans_errors ( alpm_list_t * errors )
+{
+    HV *error_hash;
+    /*HV *exception_stash;*/
+    AV *error_list;
+    alpm_list_t *iter;
+    SV *ref;
+
+    error_hash = newHV();
+    error_list = newAV();
+
+    hv_store( error_hash, "msg", 3,
+              newSVpv( alpm_strerror( pm_errno ), 0 ), 0 );
+
+    /* First convert the error list returned by the transaction
+       into an array reference.  Also store the type. */
+
+#define MAPERRLIST( TYPE )                                              \
+    hv_store( error_hash, "type", 4, newSVpv( #TYPE, 0 ), 0 );          \
+    for ( iter = errors ; iter ; iter = iter->next ) {                  \
+        av_push( error_list,                                            \
+                 convert_ ## TYPE ((pm ## TYPE ## _t *) iter->data ));  \
+    }                                                                   \
+    alpm_list_free_inner( errors,                                       \
+                          (alpm_list_fn_free)                           \
+                          free_ ## TYPE ## _errors );                   \
+    alpm_list_free( errors );                                           \
+    break
+
+#define convert_invalid_delta(STR) newSVpv( STR, 0 )
+#define pminvalid_delta_t char
+#define free_invalid_delta_errors free
+#define convert_invalid_package(STR) newSVpv( STR, 0 )
+#define pminvalid_package_t char
+#define free_invalid_package_errors free
+
+    /* fprintf( stderr, "Entering switch statement\n" ); */
+
+    switch ( pm_errno ) {
+    case PM_ERR_FILE_CONFLICTS:    MAPERRLIST( fileconflict );
+    case PM_ERR_UNSATISFIED_DEPS:  MAPERRLIST( depmissing );
+    case PM_ERR_CONFLICTING_DEPS:  MAPERRLIST( conflict );
+    case PM_ERR_DLT_INVALID:       MAPERRLIST( invalid_delta );
+    case PM_ERR_PKG_INVALID:       MAPERRLIST( invalid_package );
+    default:
+        SvREFCNT_dec( (SV *)error_hash );
+        SvREFCNT_dec( (SV *)error_list );
+        return NULL;
+    }
+
+    /* fprintf( stderr, "Left switch statement\n" ); */
+
+#undef MAPLIST
+#undef convert_invalid_delta
+#undef pminvalid_delta_t
+#undef free_invalid_delta_errors
+#undef convert_invalid_package
+#undef pminvalid_package_t
+#undef free_invalid_package_errors
+    
+    hv_store( error_hash, "list", 4, newRV_noinc( (SV *)error_list ),
+              0 );
+    /* error_hash_stash = gv_stashpv( "ALPM::Ex", 0 ); */
+
+    ref = newRV_noinc( (SV *)error_hash );
+    /* ref = sv_bless( ref, error_hash_stash ); */
+    /* fprintf( stderr, "DEBUG: returning\n" ); */
+    return ref;
+}
+
+/* CALLBACKS ******************************************************************/
+
 /* Code references to use as callbacks. */
 static SV *cb_log_sub      = NULL;
 static SV *cb_download_sub = NULL;
 static SV *cb_totaldl_sub  = NULL;
+static SV *cb_fetch_sub    = NULL;
 /* transactions */
 static SV *cb_trans_event_sub    = NULL;
 static SV *cb_trans_conv_sub     = NULL;
 static SV *cb_trans_progress_sub = NULL;
-
 
 /* String constants to use for log levels (instead of bitflags) */
 static const char * log_lvl_error    = "error";
@@ -74,7 +296,7 @@ static const char * log_lvl_unknown  = "unknown";
 void cb_log_wrapper ( pmloglevel_t level, char * format, va_list args )
 {
     SV *s_level, *s_message;
-    char *lvl_str;
+    char *lvl_str, buffer[256];
     int lvl_len;
     dSP;
 
@@ -103,8 +325,15 @@ void cb_log_wrapper ( pmloglevel_t level, char * format, va_list args )
     SAVETMPS;
 
     s_level   = sv_2mortal( newSVpv( lvl_str, lvl_len ) );
+
+    /*fprintf( stderr, "DEBUG: format = %s\n", format );*/
+
     s_message = sv_newmortal();
-    sv_vsetpvfn( s_message, format, strlen(format), &args, (SV **)NULL, 0, NULL );
+    vsnprintf( buffer, 255, format, args );
+    sv_setpv( s_message, buffer );
+    /* The following gets screwed up by j's: %jd or %ji, etc... */
+    /*sv_vsetpvfn( s_message, format, strlen(format), &args,
+                 (SV **)NULL, 0, NULL );*/
     
     PUSHMARK(SP);
     XPUSHs(s_level);
@@ -165,6 +394,56 @@ void cb_totaldl_wrapper ( off_t total )
     LEAVE;
 }
 
+int cb_fetch_wrapper ( const char *url, const char *localpath,
+                       time_t mtimeold, time_t *mtimenew )
+{
+    time_t new_time;
+    int    count;
+    SV     *result;
+    int    retval;
+    dSP;
+
+    if ( cb_fetch_sub == NULL ) return -1;
+
+    ENTER;
+    SAVETMPS;
+
+    PUSHMARK(SP);
+    XPUSHs( sv_2mortal( newSVpv( url, strlen(url) )));
+    XPUSHs( sv_2mortal( newSVpv( localpath, strlen(localpath) )));
+    XPUSHs( sv_2mortal( newSViv( mtimeold )));
+    PUTBACK;
+
+    count = call_sv( cb_fetch_sub, G_EVAL | G_SCALAR );
+
+    SPAGAIN;
+
+    result = POPs;
+
+    if ( ! SvTRUE( result ) || SvTRUE( ERRSV ) ) {
+        if ( SvTRUE( ERRSV )) warn( SvPV_nolen( ERRSV ));
+
+        retval = -1;
+    }
+    else {
+        new_time = (time_t) SvIV( result );
+        if ( mtimeold && new_time == mtimeold ) {
+            retval = 1;
+        }
+        else {
+            if ( mtimenew != NULL ) *mtimenew = new_time;
+            retval = 0;
+        }
+    }
+
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    return retval;
+}
+
+/* TRANSACTION CALLBACKS *****************************************************/
 
 /* We convert all enum constants into strings.  An event is now a hash
    with a name, status (start/done/failed/""), and arguments.
@@ -182,22 +461,22 @@ void cb_trans_event_wrapper ( pmtransevt_t event, void *arg_one, void *arg_two )
     ENTER;
     SAVETMPS;
 
-    h_event = newHV();
+    h_event = (HV*) sv_2mortal( (SV*) newHV() );
 
 #define EVT_NAME(name) \
-    hv_store( h_event, "name", 4, sv_2mortal( newSVpv( name, 0 )), 0 );
+    hv_store( h_event, "name", 4, newSVpv( name, 0 ), 0 );
 
 #define EVT_STATUS(name) \
-    hv_store( h_event, "status", 6, sv_2mortal( newSVpv( name, 0 )), 0 );
+    hv_store( h_event, "status", 6, newSVpv( name, 0 ), 0 );
 
 #define EVT_PKG(key, pkgptr)                                    \
-    s_pkg = newRV_inc( newSV(0) );                              \
-    sv_setref_pv( s_pkg, "ALPM::PackageFree", (void *)pkgptr ); \
-    hv_store( h_event, key, 0, s_pkg, 0 );
+    s_pkg = newRV_noinc( newSV(0) );                            \
+    sv_setref_pv( s_pkg, "ALPM::Package", (void *)pkgptr );     \
+    hv_store( h_event, key, strlen(key), s_pkg, 0 );
 
 #define EVT_TEXT(key, text)    \
     hv_store( h_event, key, 0, \
-              sv_2mortal( newSVpv( (char *)text, 0 )), 0 );
+              newSVpv( (char *)text, 0 ), 0 );
 
     switch ( event ) {
     case PM_TRANS_EVT_CHECKDEPS_START:
@@ -308,11 +587,10 @@ void cb_trans_event_wrapper ( pmtransevt_t event, void *arg_one, void *arg_two )
         EVT_STATUS("")
         EVT_TEXT("text", arg_one)
 		break;
-	case PM_TRANS_EVT_PRINTURI:
-        EVT_NAME("printuri")
-        EVT_STATUS("")
-        EVT_TEXT("name", arg_one)
-		break;
+    case PM_TRANS_EVT_RETRIEVE_START:
+        EVT_NAME("retrieve")
+        EVT_STATUS("start")
+        break;        
     }
 
 #undef EVT_NAME
@@ -320,21 +598,201 @@ void cb_trans_event_wrapper ( pmtransevt_t event, void *arg_one, void *arg_two )
 #undef EVT_PKG
 #undef EVT_TEXT
 
-    s_event_ref = newRV_inc( (SV *)h_event );
+    s_event_ref = newRV_noinc( (SV *)h_event );
 
     PUSHMARK(SP);
     XPUSHs(s_event_ref);
     PUTBACK;
 
+    /* fprintf( stderr, "DEBUG: trans event callback start\n" ); */
+
     call_sv( cb_trans_event_sub, G_DISCARD );
+
+    /* fprintf( stderr, "DEBUG: trans event callback stop\n" ); */
 
     FREETMPS;
     LEAVE;
+
+    return;
 }
+
+void cb_trans_conv_wrapper ( pmtransconv_t type,
+                             void *arg_one, void *arg_two, void *arg_three,
+                             int *result )
+{
+    HV *h_event;
+    SV *s_pkg;
+    dSP;
+
+    if ( cb_trans_conv_sub == NULL ) return;
+
+    ENTER;
+    SAVETMPS;
+
+    h_event = (HV*) sv_2mortal( (SV*) newHV() );
+
+#define EVT_PKG(key, pkgptr)                                    \
+    do {                                                        \
+        s_pkg = newRV_noinc( newSV(0) );                        \
+        sv_setref_pv( s_pkg, "ALPM::Package", (void *)pkgptr ); \
+        hv_store( h_event, key, strlen(key), s_pkg, 0 );        \
+    } while (0)
+
+#define EVT_TEXT(key, text)                                     \
+    do {                                                        \
+        hv_store( h_event, key, strlen(key),                    \
+                  newSVpv( (char *)text, 0 ), 0 ); \
+    } while (0)
+
+#define EVT_NAME( NAME ) EVT_TEXT("name", NAME)
+
+    hv_store( h_event, "id", 2, newSViv(type), 0 );
+    
+    switch ( type ) {
+    case PM_TRANS_CONV_INSTALL_IGNOREPKG:
+        EVT_NAME( "install_ignore" );
+        EVT_PKG ( "package", arg_one );
+        break;
+    case PM_TRANS_CONV_REPLACE_PKG:
+        EVT_NAME( "replace_package" );
+        EVT_PKG ( "old", arg_one );
+        EVT_PKG ( "new", arg_two );
+        EVT_TEXT( "db",  arg_three  );
+        break;
+    case PM_TRANS_CONV_CONFLICT_PKG:
+        EVT_NAME( "package_conflict" );
+        EVT_TEXT( "package", arg_one );
+        EVT_TEXT( "removable", arg_two );
+        break;
+    case PM_TRANS_CONV_CORRUPTED_PKG:
+        EVT_NAME( "corrupted_file" );
+        EVT_TEXT( "filename", arg_one );
+        break;
+    }
+
+#undef EVENT
+#undef EVT_NAME
+#undef EVT_PKG
+#undef EVT_TEXT
+
+    PUSHMARK(SP);
+    XPUSHs( newRV_noinc( (SV *)h_event ));
+    PUTBACK;
+
+    /* fprintf( stderr, "DEBUG: trans conv callback start\n" ); */
+
+    call_sv( cb_trans_conv_sub, G_SCALAR );
+
+    /* fprintf( stderr, "DEBUG: trans conv callback stop\n" ); */
+
+    SPAGAIN;
+
+    *result = POPi;
+
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    return;
+}
+
+void cb_trans_progress_wrapper( pmtransprog_t type,
+                                const char * desc,
+                                int item_progress,
+                                int total_count, int total_pos )
+{
+    HV *h_event;
+    dSP;
+
+    if ( cb_trans_progress_sub == NULL ) return;
+
+    ENTER;
+    SAVETMPS;
+
+    h_event = (HV*) sv_2mortal( (SV*) newHV() );
+
+#define EVT_TEXT(key, text)                        \
+    do {                                           \
+        hv_store( h_event, key, strlen(key),       \
+                  newSVpv( (char *)text, 0 ), 0 ); \
+    } while (0)
+
+#define EVT_NAME( NAME ) EVT_TEXT("name", NAME); break;
+
+#define EVT_INT(KEY, INT)                          \
+    do {                                           \
+        hv_store( h_event, KEY, strlen(KEY),       \
+                  newSViv(INT), 0 );               \
+    } while (0)
+
+    switch( type ) {
+    case PM_TRANS_PROGRESS_ADD_START:       EVT_NAME( "add"       );
+    case PM_TRANS_PROGRESS_UPGRADE_START:   EVT_NAME( "upgrade"   );
+    case PM_TRANS_PROGRESS_REMOVE_START:    EVT_NAME( "remove"    );
+    case PM_TRANS_PROGRESS_CONFLICTS_START: EVT_NAME( "conflicts" );
+    }
+
+    EVT_INT ( "id",          type );
+    EVT_TEXT( "desc",        desc );
+    EVT_INT ( "item",        item_progress );
+    EVT_INT ( "total_count", total_count );
+    EVT_INT ( "total_pos",   total_pos );
+
+#undef EVT_INT
+#undef EVT_NAME
+
+    PUSHMARK(SP);
+    XPUSHs( newRV_noinc( (SV *)h_event ));
+    PUTBACK;
+
+    /* fprintf( stderr, "DEBUG: trans progress callback start\n" ); */
+
+    call_sv( cb_trans_progress_sub, G_SCALAR );
+
+    /* fprintf( stderr, "DEBUG: trans progress callback stop\n" ); */
+
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    return;
+}
+
+/* This macro is used inside alpm_trans_init.
+   CB_NAME is one of the transaction callback types (event, conv, progress).
+
+   * [CB_NAME]_sub is the argument to the trans_init XSUB.
+   * [CB_NAME]_func is a variable to hold the function pointer to pass
+     to the real C ALPM function.
+   * cb_trans_[CB_NAME]_wrapper is the name of the C wrapper function which
+     calls the perl sub stored in the global variable:
+   * cb_trans_[CB_NAME]_sub.
+*/
+#define UPDATE_TRANS_CALLBACK( CB_NAME )                                \
+    if ( SvOK( CB_NAME ## _sub ) ) {                                    \
+        if ( SvTYPE( SvRV( CB_NAME ## _sub ) ) != SVt_PVCV ) {          \
+            croak( "Callback arguments must be code references" );      \
+        }                                                               \
+        if ( cb_trans_ ## CB_NAME ## _sub ) {                           \
+            sv_setsv( cb_trans_ ## CB_NAME ## _sub, CB_NAME ## _sub );   \
+        }                                                               \
+        else {                                                          \
+            cb_trans_ ## CB_NAME ## _sub = newSVsv( CB_NAME ## _sub );  \
+        }                                                               \
+        CB_NAME ## _func = cb_trans_ ## CB_NAME ## _wrapper;            \
+    }                                                                   \
+    else if ( cb_trans_ ## CB_NAME ## _sub != NULL ) {                  \
+        /* If no event callback was provided for this new transaction,  \
+           and an event callback is active, then remove the old callback. */ \
+        SvREFCNT_dec( cb_trans_ ## CB_NAME ## _sub );                   \
+        cb_trans_ ## CB_NAME ## _sub = NULL;                            \
+    }
 
 MODULE = ALPM    PACKAGE = ALPM
 
 PROTOTYPES: DISABLE
+
+INCLUDE: const-xs.inc
 
 MODULE = ALPM    PACKAGE = ALPM::ListAutoFree
 
@@ -358,17 +816,15 @@ DESTROY(self)
 
 MODULE = ALPM    PACKAGE = ALPM
 
-INCLUDE: const-xs.inc
-
 ALPM_PackageFree
-load_pkgfile(filename, ...)
+alpm_pkg_load(filename, ...)
     const char *filename
   PREINIT:
     pmpkg_t *pkg;
-    unsigned short full;
+#    unsigned short full;
   CODE:
-    full = ( items > 1 ? 1 : 0 );
-    if ( alpm_pkg_load( filename, full, &pkg ) != 0 )
+#    full = ( items > 1 ? 1 : 0 );
+    if ( alpm_pkg_load( filename, 1, &pkg ) != 0 )
         croak( "ALPM Error: %s", alpm_strerror( pm_errno ));
     RETVAL = pkg;
   OUTPUT:
@@ -382,7 +838,7 @@ alpm_initialize()
 negative_is_error
 alpm_release()
 
-MODULE = ALPM    PACKAGE = ALPM    PREFIX=alpm_option_
+MODULE = ALPM    PACKAGE = ALPM
 
 SV *
 alpm_option_get_logcb()
@@ -399,6 +855,7 @@ alpm_option_set_logcb(callback)
         if ( cb_log_sub != NULL ) {
             SvREFCNT_dec( cb_log_sub );
             alpm_option_set_logcb( NULL );
+            cb_log_sub = NULL;
         }
     }
     else {
@@ -406,10 +863,13 @@ alpm_option_set_logcb(callback)
             croak( "value for logcb option must be a code reference" );
         }
 
-        if ( cb_log_sub != NULL ) SvREFCNT_dec( cb_log_sub );
-
-        cb_log_sub = newSVsv(callback);
-        alpm_option_set_logcb( cb_log_wrapper );
+        if ( cb_log_sub ) {
+            sv_setsv( cb_log_sub, callback );
+        }
+        else {
+            cb_log_sub = newSVsv(callback);
+            alpm_option_set_logcb( cb_log_wrapper );
+        }
     }
 
 SV *
@@ -427,6 +887,7 @@ alpm_option_set_dlcb(callback)
         if ( cb_download_sub != NULL ) {
             SvREFCNT_dec( cb_download_sub );
             alpm_option_set_dlcb( NULL );
+            cb_download_sub = NULL;
         }
     }
     else {
@@ -434,10 +895,13 @@ alpm_option_set_dlcb(callback)
             croak( "value for dlcb option must be a code reference" );
         }
 
-        if ( cb_download_sub != NULL ) SvREFCNT_dec( cb_download_sub );
-
-        cb_download_sub = newSVsv(callback);
-        alpm_option_set_dlcb( cb_download_wrapper );
+        if ( cb_download_sub ) {
+            sv_setsv( cb_download_sub, callback );
+        }
+        else {
+            cb_download_sub = newSVsv(callback);
+            alpm_option_set_dlcb( cb_download_wrapper );
+        }
     }
 
 
@@ -456,6 +920,7 @@ alpm_option_set_totaldlcb(callback)
         if ( cb_totaldl_sub != NULL ) {
             SvREFCNT_dec( cb_totaldl_sub );
             alpm_option_set_totaldlcb( NULL );
+            cb_totaldl_sub = NULL;
         }
     }
     else {
@@ -463,11 +928,47 @@ alpm_option_set_totaldlcb(callback)
             croak( "value for totaldlcb option must be a code reference" );
         }
 
-        if ( cb_totaldl_sub != NULL ) SvREFCNT_dec( cb_totaldl_sub );
-
-        cb_totaldl_sub = newSVsv(callback);
-        alpm_option_set_totaldlcb( cb_totaldl_wrapper );
+        if ( cb_totaldl_sub ) {
+            sv_setsv( cb_totaldl_sub, callback );
+        }
+        else {
+            cb_totaldl_sub = newSVsv(callback);
+            alpm_option_set_totaldlcb( cb_totaldl_wrapper );
+        }
     }
+
+SV *
+alpm_option_get_fetchcb()
+  CODE:
+    RETVAL = ( cb_fetch_sub == NULL ? &PL_sv_undef : cb_fetch_sub );
+  OUTPUT:
+    RETVAL
+
+void
+alpm_option_set_fetchcb(callback)
+    SV * callback
+  CODE:
+    if ( ! SvOK(callback) ) {
+        if ( cb_fetch_sub != NULL ) {
+            SvREFCNT_dec( cb_fetch_sub );
+            alpm_option_set_fetchcb( NULL );
+            cb_fetch_sub = NULL;
+        }
+    }
+    else {
+        if ( ! SvROK(callback) || SvTYPE( SvRV(callback) ) != SVt_PVCV ) {
+            croak( "value for fetchcb option must be a code reference" );
+        }
+
+        if ( cb_fetch_sub ) {
+            sv_setsv( cb_fetch_sub, callback );
+        }
+        else {
+            cb_fetch_sub = newSVsv(callback);
+            alpm_option_set_fetchcb( cb_fetch_wrapper );
+        }
+    }
+
 
 const char *
 alpm_option_get_root()
@@ -561,21 +1062,6 @@ alpm_option_remove_ignorepkg(pkg)
     const char * pkg
 
 StringListNoFree
-alpm_option_get_holdpkgs()
-
-void
-alpm_option_add_holdpkg(pkg)
-    const char * pkg
-
-void
-alpm_option_set_holdpkgs(holdpkgs_list)
-    StringListNoFree holdpkgs_list
-
-negative_is_error
-alpm_option_remove_holdpkg(pkg)
-    const char * pkg
-
-StringListNoFree
 alpm_option_get_ignoregrps()
 
 void
@@ -589,13 +1075,6 @@ alpm_option_set_ignoregrps(ignoregrps_list)
 negative_is_error
 alpm_option_remove_ignoregrp(grp)
     const char  * grp
-
-const char *
-alpm_option_get_xfercommand()
-
-void
-alpm_option_set_xfercommand(cmd)
-    const char * cmd
 
 unsigned short
 alpm_option_get_nopassiveftp()
@@ -626,6 +1105,13 @@ alpm_option_get_localdb()
 DatabaseList
 alpm_option_get_syncdbs()
 
+negative_is_error
+alpm_db_unregister_all()
+
+#--------------------------------------------------------------------------
+# ALPM::DB Functions
+#--------------------------------------------------------------------------
+
 MODULE = ALPM    PACKAGE = ALPM    PREFIX=alpm_
 
 ALPM_DB
@@ -635,17 +1121,19 @@ ALPM_DB
 alpm_db_register_sync(sync_name)
     const char * sync_name
 
-MODULE = ALPM   PACKAGE = ALPM::DB    PREFIX=alpm_db_
-
-negative_is_error
-alpm_db_unregister_all()
+MODULE = ALPM   PACKAGE = ALPM::DB
 
 const char *
-alpm_db_get_name(db)
+name(db)
     ALPM_DB db
+  CODE:
+    RETVAL = alpm_db_get_name(db);
+  OUTPUT:
+    RETVAL
 
+# We have a wrapper for this because it crashes on local db.
 const char *
-alpm_db__get_url(db)
+_url(db)
     ALPM_DB db
   CODE:
     RETVAL = alpm_db_get_url(db);
@@ -653,7 +1141,7 @@ alpm_db__get_url(db)
     RETVAL
 
 negative_is_error
-alpm_db__set_server(db, url)
+set_server(db, url)
     ALPM_DB db
     const char * url
   CODE:
@@ -661,8 +1149,9 @@ alpm_db__set_server(db, url)
   OUTPUT:
     RETVAL
 
+# Wrapper for this checks if a transaction is active.
 negative_is_error
-alpm_db__update(db, level)
+_update(db, level)
     ALPM_DB db
     int level
   CODE:
@@ -671,7 +1160,7 @@ alpm_db__update(db, level)
     RETVAL
 
 SV *
-alpm_db_get_pkg(db, name)
+find(db, name)
     ALPM_DB db
     const char *name
   PREINIT:
@@ -687,36 +1176,34 @@ alpm_db_get_pkg(db, name)
     RETVAL
 
 PackageListNoFree
-alpm_db_get_pkg_cache(db)
+_get_pkg_cache(db)
     ALPM_DB db
   CODE:
-    RETVAL = alpm_db_getpkgcache(db);
+    RETVAL = alpm_db_get_pkgcache(db);
   OUTPUT:
     RETVAL
 
-PackageListNoFree
-alpm_db_get_group(db, name)
-    ALPM_DB      db
-    const char   * name
-  PREINIT:
-    pmgrp_t *group;
+ALPM_Group
+find_group(db, name)
+    ALPM_DB db
+    const char * name
   CODE:
-    group = alpm_db_readgrp(db, name);
-    RETVAL = ( group == NULL ? NULL : group->packages );
+    RETVAL = alpm_db_readgrp(db, name);
   OUTPUT:
     RETVAL
   
 GroupList
-alpm_db_get_group_cache(db)
-    ALPM_DB       db
+_get_group_cache(db)
+    ALPM_DB db
   CODE:
-    RETVAL = alpm_db_getgrpcache(db);
+    RETVAL = alpm_db_get_grpcache(db);
   OUTPUT:
     RETVAL
 
+# Wrapped to avoid arrayrefs (which are much easier in typemap)
 PackageListFree
-alpm_db__search(db, needles)
-    ALPM_DB        db
+_search(db, needles)
+    ALPM_DB db
     StringListFree needles
   CODE:
     RETVAL = alpm_db_search(db, needles);
@@ -744,103 +1231,231 @@ alpm_pkg_compute_requiredby(pkg)
     ALPM_Package pkg
 
 const char *
-alpm_pkg_get_filename(pkg)
+alpm_pkg_filename(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_filename(pkg);
+  OUTPUT:
+    RETVAL
 
 const char *
-alpm_pkg_get_name(pkg)
+alpm_pkg_name(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_name(pkg);
+  OUTPUT:
+    RETVAL
 
 const char *
-alpm_pkg_get_version(pkg)
+alpm_pkg_version(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_version(pkg);
+  OUTPUT:
+    RETVAL
 
 const char *
-alpm_pkg_get_desc(pkg)
+alpm_pkg_desc(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_desc(pkg);
+  OUTPUT:
+    RETVAL
 
 const char *
-alpm_pkg_get_url(pkg)
+alpm_pkg_url(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_url(pkg);
+  OUTPUT:
+    RETVAL
 
 time_t
-alpm_pkg_get_builddate(pkg)
+alpm_pkg_builddate(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_builddate(pkg);
+  OUTPUT:
+    RETVAL
 
 time_t
-alpm_pkg_get_installdate(pkg)
+alpm_pkg_installdate(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_installdate(pkg);
+  OUTPUT:
+    RETVAL
 
 const char *
-alpm_pkg_get_packager(pkg)
+alpm_pkg_packager(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_packager(pkg);
+  OUTPUT:
+    RETVAL
 
 const char *
-alpm_pkg_get_md5sum(pkg)
+alpm_pkg_md5sum(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_md5sum(pkg);
+  OUTPUT:
+    RETVAL
 
 const char *
-alpm_pkg_get_arch(pkg)
+alpm_pkg_arch(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_arch(pkg);
+  OUTPUT:
+    RETVAL
 
 off_t
-alpm_pkg_get_size(pkg)
+alpm_pkg_size(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_size(pkg);
+  OUTPUT:
+    RETVAL
 
 off_t
-alpm_pkg_get_isize(pkg)
+alpm_pkg_isize(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_isize(pkg);
+  OUTPUT:
+    RETVAL
 
 pmpkgreason_t
-alpm_pkg_get_reason(pkg)
+alpm_pkg_reason(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_reason(pkg);
+  OUTPUT:
+    RETVAL
 
 StringListNoFree
-alpm_pkg_get_licenses(pkg)
+alpm_pkg_licenses(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_licenses(pkg);
+  OUTPUT:
+    RETVAL
 
 StringListNoFree
-alpm_pkg_get_groups(pkg)
+alpm_pkg_groups(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_groups(pkg);
+  OUTPUT:
+    RETVAL
 
 DependList
-alpm_pkg_get_depends(pkg)
+alpm_pkg_depends(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_depends(pkg);
+  OUTPUT:
+    RETVAL
 
 StringListNoFree
-alpm_pkg_get_optdepends(pkg)
+alpm_pkg_optdepends(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_optdepends(pkg);
+  OUTPUT:
+    RETVAL
 
 StringListNoFree
-alpm_pkg_get_conflicts(pkg)
+alpm_pkg_conflicts(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_conflicts(pkg);
+  OUTPUT:
+    RETVAL
 
 StringListNoFree
-alpm_pkg_get_provides(pkg)
+alpm_pkg_provides(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_provides(pkg);
+  OUTPUT:
+    RETVAL
 
 StringListNoFree
-alpm_pkg_get_deltas(pkg)
+alpm_pkg_deltas(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_deltas(pkg);
+  OUTPUT:
+    RETVAL
 
 StringListNoFree
-alpm_pkg_get_replaces(pkg)
+alpm_pkg_replaces(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_replaces(pkg);
+  OUTPUT:
+    RETVAL
 
 StringListNoFree
-alpm_pkg_get_files(pkg)
+alpm_pkg_files(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_files(pkg);
+  OUTPUT:
+    RETVAL
 
 StringListNoFree
-alpm_pkg_get_backup(pkg)
+alpm_pkg_backup(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_backup(pkg);
+  OUTPUT:
+    RETVAL
 
-# TODO: create get_changelog() method that does all this at once, easy with perl
-# void *alpm_pkg_changelog_open(ALPM_Package pkg);
-# size_t alpm_pkg_changelog_read(void *ptr, size_t size,
-# 		const ALPM_Package pkg, const void *fp);
-# int alpm_pkg_changelog_feof(const ALPM_Package pkg, void *fp);
-# int alpm_pkg_changelog_close(const ALPM_Package pkg, void *fp);
+StringListNoFree
+alpm_pkg_removes(pkg)
+    ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_removes(pkg);
+  OUTPUT:
+    RETVAL
+
+ALPM_DB
+alpm_pkg_db(pkg)
+    ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_get_db(pkg);
+  OUTPUT:
+    RETVAL
+
+SV *
+alpm_pkg_changelog(pkg)
+    ALPM_Package pkg
+  PREINIT:
+    void *fp;
+    char buffer[128];
+    size_t bytes_read;
+    SV *changelog_txt;
+  CODE:
+    changelog_txt = newSVpv( "", 0 );
+    RETVAL = changelog_txt;
+
+    fp = alpm_pkg_changelog_open( pkg );
+    if ( fp ) {
+        while ( 1 ) {
+            bytes_read = alpm_pkg_changelog_read( (void *)buffer, 128,
+                                                  pkg, fp );
+            /* fprintf( stderr, "DEBUG: read %d bytes of changelog\n", */
+            /*          bytes_read ); */
+            if ( bytes_read == 0 ) break;
+            sv_catpvn( changelog_txt, buffer, bytes_read );
+        }
+        alpm_pkg_changelog_close( pkg, fp );
+    }
+  OUTPUT:
+    RETVAL
 
 unsigned short
 alpm_pkg_has_scriptlet(pkg)
@@ -854,42 +1469,72 @@ off_t
 alpm_pkg_download_size(newpkg)
     ALPM_Package newpkg
 
-MODULE=ALPM    PACKAGE=ALPM::Group    PREFIX=alpm_grp_
+#-----------------------------------------------------------------------------
+# PACKAGE GROUPS
+#-----------------------------------------------------------------------------
+
+MODULE=ALPM    PACKAGE=ALPM::Group
 
 const char *
-alpm_grp_get_name(grp)
+name(grp)
     ALPM_Group grp
+  CODE:
+    RETVAL = alpm_grp_get_name(grp);
+  OUTPUT:
+    RETVAL
 
 PackageListNoFree
-alpm_grp_get_pkgs(grp)
+_get_pkgs(grp)
     ALPM_Group grp
+  CODE:
+    RETVAL = alpm_grp_get_pkgs(grp);
+  OUTPUT:
+    RETVAL
+
+#-----------------------------------------------------------------------------
+# TRANSACTIONS
+#-----------------------------------------------------------------------------
 
 MODULE=ALPM    PACKAGE=ALPM
 
 negative_is_error
-alpm_trans_init(type, flags, event_sub)
+alpm_trans_init(type, flags, event_sub, conv_sub, progress_sub)
     int type
     int flags
     SV  *event_sub
+    SV  *conv_sub
+    SV  *progress_sub
   PREINIT:
-    alpm_trans_cb_event event_func = NULL;
+    alpm_trans_cb_event     event_func = NULL;
+    alpm_trans_cb_conv      conv_func  = NULL;
+    alpm_trans_cb_progress  progress_func  = NULL;
   CODE:
-    if ( SvOK( event_sub ) ) {
-        if ( ! SvTYPE( event_sub ) == SVt_PVCV ) {
-            croak( "Callback arguments must be code references" );
-        }
-#       fprintf( stderr, "DEBUG: set event callback!\n" );
-        cb_trans_event_sub = event_sub;
-        event_func = cb_trans_event_wrapper;
-    }
+    /* I'm guessing that event callbacks provided for previous transactions
+       shouldn't come into effect for later transactions unless explicitly
+       provided. */
 
-    RETVAL = alpm_trans_init( type, flags, event_func, NULL, NULL );
+    UPDATE_TRANS_CALLBACK( event )
+    UPDATE_TRANS_CALLBACK( conv )
+    UPDATE_TRANS_CALLBACK( progress )
+
+    RETVAL = alpm_trans_init( type, flags,
+                              event_func, conv_func, progress_func );
+  OUTPUT:
+    RETVAL
+
+negative_is_error
+alpm_trans_sysupgrade(enable_downgrade)
+    int enable_downgrade
+  CODE:
+    RETVAL = alpm_trans_sysupgrade( enable_downgrade );
   OUTPUT:
     RETVAL
 
 MODULE=ALPM    PACKAGE=ALPM::Transaction
 
-# This is used internally, we keep the full name
+# This is used internally, we use the full name of the function
+# (no PREFIX above)
+
 negative_is_error
 alpm_trans_addtarget(target)
     char * target
@@ -906,12 +1551,57 @@ DESTROY(self)
 MODULE=ALPM    PACKAGE=ALPM::Transaction    PREFIX=alpm_trans_
 
 negative_is_error
+alpm_trans_prepare(self)
+    SV * self
+  PREINIT:
+    alpm_list_t *errors;
+    HV *trans;
+    SV *trans_error, **prepared;
+  CODE:
+    trans = (HV *) SvRV(self);
+
+    prepared = hv_fetch( trans, "prepared", 8, 0 );
+    if ( SvOK(*prepared) && SvTRUE(*prepared) ) {
+        RETVAL = 0;
+    }
+    else {
+        /* fprintf( stderr, "DEBUG: ALPM::Transaction::prepare\n" ); */
+
+        errors = NULL;
+        RETVAL = alpm_trans_prepare( &errors );
+
+        if ( RETVAL == -1 ) {
+            trans_error = convert_trans_errors( errors );
+            if ( trans_error ) {
+                hv_store( trans, "error", 5, trans_error, 0 );
+
+                croak( "ALPM Transaction Error: %s", alpm_strerror( pm_errno ));
+                fprintf( stderr, "ERROR: prepare shouldn't get here?\n" );
+                RETVAL = 0;
+            }
+
+            /* If we don't catch all the kinds of errors we'll get memory
+               leaks inside the list!  Yay! */
+            if ( errors ) {
+                fprintf( stderr,
+                         "ERROR: unknown prepare error caused memory leak "
+                         "at %s line %d\n", __FILE__, __LINE__ );
+            }
+        }
+        else hv_store( trans, "prepared", 8, newSViv(1), 0 );
+
+        /* fprintf( stderr, "DEBUG: ALPM::Transaction::prepare returning\n" ); */
+    }
+  OUTPUT:
+    RETVAL
+
+negative_is_error
 alpm_trans_commit(self)
     SV * self
   PREINIT:
     alpm_list_t *errors;
     HV *trans;
-    SV **prepared;
+    SV *trans_error, **prepared;
   CODE:
     /* make sure we are called as a method */
     if ( !( SvROK(self) /* && SvTYPE(self) == SVt_PVMG */
@@ -922,18 +1612,35 @@ alpm_trans_commit(self)
     trans = (HV *) SvRV(self);
     prepared = hv_fetch( trans, "prepared", 8, 0 );
 
+    /*fprintf( stderr, "DEBUG: prepared = %d\n", SvIV(*prepared) );*/
+
     /* prepare before we commit */
     if ( ! SvOK(*prepared) || ! SvTRUE(*prepared) ) {
         PUSHMARK(SP);
         XPUSHs(self);
         PUTBACK;
-#        fprintf( stderr, "DEBUG: before call_method\n" );
         call_method( "prepare", G_DISCARD );
-#        fprintf( stderr, "DEBUG: after call_method\n" );
     }
     
     errors = NULL;
     RETVAL = alpm_trans_commit( &errors );
+
+    if ( RETVAL == -1 ) {
+        trans_error = convert_trans_errors( errors );
+        if ( trans_error ) {
+            hv_store( trans, "error", 5, trans_error, 0 );
+            croak( "ALPM Transaction Error: %s", alpm_strerror( pm_errno ));
+            fprintf( stderr, "ERROR: commit shouldn't get here?\n" );
+            RETVAL = 0;
+        }
+
+        if ( errors ) {
+            fprintf( stderr,
+                     "ERROR: unknown commit error caused memory leak "
+                     "at %s line %d\n",
+                     __FILE__, __LINE__ );
+        }
+    }
   OUTPUT:
     RETVAL
 
@@ -946,35 +1653,13 @@ alpm_trans_interrupt(self)
     RETVAL
 
 negative_is_error
-alpm_trans_prepare(self)
+alpm_trans_sysupgrade(self, enable_downgrade)
     SV * self
-  PREINIT:
-    alpm_list_t *errors;
-    HV *trans;
-    SV **prepared;
+    int enable_downgrade
   CODE:
-    trans = (HV *) SvRV(self);
-
-    prepared = hv_fetch( trans, "prepared", 8, 0 );
-    if ( SvOK(*prepared) && SvTRUE(*prepared) ) {
-        RETVAL = 0;
-    }   
-    else {
-        hv_store( trans, "prepared", 8, newSViv(1), 0 );
-        #fprintf( stderr, "DEBUG: ALPM::Transaction::prepare\n" );
-
-        errors = NULL;
-        RETVAL = alpm_trans_prepare( &errors );
-    }
+    RETVAL = alpm_trans_sysupgrade( enable_downgrade );
   OUTPUT:
     RETVAL
 
-negative_is_error
-alpm_trans_sysupgrade(self)
-    SV * self
-  CODE:
-    RETVAL = alpm_trans_sysupgrade();
-  OUTPUT:
-    RETVAL
 
 # EOF

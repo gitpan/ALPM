@@ -1,6 +1,10 @@
 =head1 NAME
 
-ALPM - XS module, OO wrapper of libalpm, Archlinux's packaging system
+ALPM - XS module for libalpm (ArchLinux Package Manager)
+
+=head1 VERSION
+
+0.04 -- compatible with pacman 3.3.0's alpm
 
 =head1 SYNOPSIS
 
@@ -21,33 +25,41 @@ ALPM - XS module, OO wrapper of libalpm, Archlinux's packaging system
   my ($root, $dbpath, $cachedir) = @alpm{qw/root dbpath cachedir/};
 
   # Callback options...
-  $alpm{logcb} = sub { my ($msg, $lvl) = @_; print "[$lvl] $msg\n" };
-
+  $alpm{logcb} = sub { my ($lvl, $msg) = @_; print "[$lvl] $msg\n" };
 
   # Querying databases & packages
-  my $localdb = ALPM->local_db;
+  my $localdb = ALPM->localdb;
   my $pkg     = $localdb->get_pkg('perl');
 
   # Lots of different ways to get package attributes...
-  my $attribs_ref    = $pkg->get_attribs_ref;
-  my $name           = $pkg->get_name;
-  my ($size, $isize) = $pkg->get_attribs('size', 'isize');
+  my $attribs_ref    = $pkg->attribs_ref;
+  my $name           = $pkg->name;
+  my ($size, $isize) = $pkg->attribs('size', 'isize');
   print "$name $attribs_ref->{version} $attribs_ref->{arch} $size/$isize";
 
-  my $syncdb = ALPM->register_db( 'extra',
-                                  'ftp://ftp.archlinux.org/$repo/os/i686' );
-  my $perlpkgs = $syncdb->search('perl');
-  printf "%d perl packages found.\n", scalar @{$perlpkgs};
+  my $syncdb   = ALPM->register( 'extra',
+                                 'ftp://ftp.archlinux.org/$repo/os/i686' );
+  my @perlpkgs = $syncdb->search('perl');
+  printf "%d perl packages found.\n", scalar @perlpkgs;
 
+  # Search all databases/repos.
+  print map { sprintf "%10s: %s %s\n", $_->db->get_name, $_->name, $_->version }
+            ALPM->search('perl');
+
+  # Find a database by name of repository.
+  my $coredb = ALPM->db('core');
 
   # Transactions
-  my $trans = ALPM->transaction( type => 'upgrade' );
+  my $trans = ALPM->transaction( type => 'sync' );
   $trans->add( 'perl', 'perl-alpm', 'pacman' );
-  #$trans->prepare;  (unnecessary, commit does it if needed)
+  #$trans->prepare; # unnecessary, commit calls prepare if needed
   $trans->commit;
-  $trans = undef; # to force releasing, not required though
+  undef $trans;     # to force releasing, now!
 
 =head1 DESCRIPTION
+
+This version of ALPM works with the libalpm included with version 3.30
+of pacman.
 
 Archlinux uses a package manager called pacman.  Pacman internally
 uses the alpm library for handling its database of packages.  This
@@ -69,11 +81,20 @@ global for everyone who is using the module.  You can specify either:
 
 =over
 
-=item 1. The path to a pacman.conf configuration file
+=item 1. The path to a pacman.conf configuration file.  Example:
 
-=item 2. A hash of options to use for ALPM
+  use ALPM qw( /etc/pacman.conf );
+
+=item 2. A hash of options to use for ALPM.  Example:
+
+  use ALPM qw( root        => '/',
+               dbpath      => '/var/lib/pacman/',
+               cachedirs   => [ '/var/cache/pacman/pkg' ],
+               logfile     => '/var/log/pacman.log' );
 
 =back
+
+It is important to set options as soon as possible.
 
 =head1 OPTIONS
 
@@ -87,29 +108,53 @@ options return multiple values as an array reference.
 
 =over
 
-=item B<root> - root directory of entire system
+=item B<root>
 
-=item B<dbpath> - path to the ALPM/pacman database
+root directory of entire system
 
-=item B<cachedirs>* - paths containing package caches
+=item B<dbpath>
 
-=item B<logfile> - path to the pacman logfile
+path to the ALPM/pacman database
 
-=item B<usesyslog> - if true, log to the system log as well
+=item B<cachedirs>*
 
-=item B<noupgrades>* - a list of package names to not upgrade
+paths containing package caches
 
-=item B<noextracts>* - a list of package names to not extract
+=item B<logfile>
 
-=item B<ignorepkgs>* - a list of package names to ignore for upgrade
+path to the pacman logfile
 
-=item B<holdpkgs>* - a list of package names to hold off upgrading
+=item B<usesyslog>
 
-=item B<ignoregrps>* - a list of groups to ignore for upgrade
+if true, log to the system log as well
 
-=item B<xfercommand> - shell command to use for downloading (ie wget)
+=item B<noupgrades>*
 
-=item B<nopassiveftp>+ - if true, do not use passive ftp mode
+a list of package names to not upgrade
+
+=item B<noextracts>*
+
+a list of package names to not extract
+
+=item B<ignorepkgs>*
+
+a list of package names to ignore for upgrade
+
+=item B<holdpkgs>*
+
+a list of package names to hold off upgrading
+
+=item B<ignoregrps>*
+
+a list of groups to ignore for upgrade
+
+=item B<xfercommand>
+
+shell command to use for downloading (ie wget)
+
+=item B<nopassiveftp>+
+
+if true, do not use passive ftp mode
 
 =back
 
@@ -117,11 +162,17 @@ options return multiple values as an array reference.
 
 =over
 
-=item B<lockfile> - path to the lockfile
+=item B<lockfile>
 
-=item B<localdb> - the ALPM::DB object representing the local database
+path to the lockfile
 
-=item B<syncdbs>* - an array-ref of sync databases as ALPM::DB objects
+=item B<localdb>
+
+the ALPM::DB object representing the local database
+
+=item B<syncdbs>*
+
+an array-ref of sync databases as ALPM::DB objects
 
 =back
 
@@ -138,7 +189,7 @@ Callbacks can only be set to code references.
 
 The log message and level are passed to the provided code ref as
 arguments.  I<level> can be: error, warning, debug, function, or
-unknown
+unknown.
 
 =item B<dlcb> - Download callback
 
@@ -194,8 +245,8 @@ package or database-specific functions.
 =head2 register_db
 
   Usage   : my $localdb = ALPM->register_db;
-            my $syncdb  = ALPM->register_db( 'core' =>
-                                             'ftp://ftp.archlinux.org/$repo/os/i686' );
+            my $syncdb  = ALPM->register_db
+                ( 'core' => 'ftp://ftp.archlinux.org/$repo/os/i686' );
   Params  : No parameters will return the local database.
             Two parameters will register a sync database:
             1) The name of the repository to connect to.
@@ -206,20 +257,42 @@ package or database-specific functions.
   Throws  : An 'ALPM DB Error: ...' message is croaked on errors.
   Returns : An ALPM::DB object.
 
+You can also use the method C<register> which is a shorter alias for
+C<register_db>.
+
 See L<ALPM::DB>
 
-=head2 local_db
+=head2 localdb
 
+  Usage   : my $db = ALPM->localdb;
   Returns : The local system database as an ALPM::DB object.
   Precond : You must set certain options first.
+  Notes   : This is what is called by register_db without arguments.
 
-  This is what is called by register_db without arguments.
+=head2 syncdbs
 
-=head2 get_repo_db
+  Usage   : my @dbs = ALPM->syncdbs;
+  Purpose : Nicer looking wrapper to ALPM->get_option('syncdbs');
+  Params  : None.
+  Returns : A list (not an arrayref) of sync databases.
 
-  Usage   : my $comm_db = ALPM->get_repo_db('community');
+=head2 db
+
+  Usage   : my $comm_db = ALPM->db('community');
+            my $comm_db = ALPM->repodb('community');
   Params  : The name of a repository.
   Returns : An ALPM::DB object matching the repo name.
+
+This is a shorter alias for the method C<repodb>.
+
+=head2 dbs
+
+  Usage   : my @dbs = ALPM->dbs;
+            my @dbs = ALPM->databases;
+  Params  : None
+  Returns : A list of each database that is registered.
+
+This is a shorter alias for the method C<databases>.
 
 See L<ALPM::DB>
 
@@ -228,6 +301,8 @@ See L<ALPM::DB>
   Usage   : my $pkgfile = ALPM->load_pkgfile('perl-alpm-0.2.pkg.tar.gz');
   Params  : The path to a package tarball.
   Returns : An ALPM::Package object.
+  Notes   : Technically we return an ALPM::PackageFree object that will
+            automatically free itself from memory when it goes out of scope.
 
 See L<ALPM::Package>
 
@@ -239,37 +314,119 @@ See L<ALPM::Package>
 
 =head2 transaction
 
-  Usage   : my $t = ALPM->transaction( type => 'sync',
-                                       flags => qw/ nodeps / );
+  Usage   : my $t = ALPM->transaction( type     => 'sync',
+                                       flags    => 'nodeps force',
+                                       event    => sub { ... },
+                                       conv     => sub { ... },
+                                       progress => sub { ... } );
   Purpose : Initializes a transaction
   Params  : A hash of the transaction settings
-            type  => A string, can be upgrade, remove, removeupgrade, or sync.
-            flags => A list of strings, valid flags are:
-                nodeps, force, nosave, cascade, recurse, dbonly,
-                alldeps, dlonly, noscriptlet, noconflicts, printuris,
-                needed, allexplicit, unneeded, recurseall
-            event => A coderef, used as an event callback.
-                When an event occurs, the coderef is passed a hashref
-                representing the event.  Events are explained in
-                detail in the ALPM::Transaction document.
   Throws  : An 'ALPM Error: ...' is thrown if a transaction is
             already active.
   Returns : An ALPM::Transaction object.
 
 See L<ALPM::Transaction>
 
+=head3 transaction Parameters
+
+Transactions have many named parameters, passed as a hash.
+
+=over 4
+
+=item type - A string, valid types are:
+
+=over 4
+
+=item * upgrade
+
+=item * remove
+
+=item * removeupgrade
+
+=item * sync
+
+=item * sysupgrade
+
+=back
+
+=item flags - A string of flags, each separated by whitespace.
+
+=over 4
+
+=item * nodeps
+
+=item * force
+
+=item * nosave
+
+=item * cascade
+
+=item * recurse
+
+=item * dbonly
+
+=item * alldeps
+
+=item * dlonly
+
+=item * noscriptlet
+
+=item * noconflicts
+
+=item * printuris
+
+=item * needed
+
+=item * allexplicit
+
+=item * unneeded
+
+=item * recurseall
+
+=back
+
+=item event - A coderef, used as an event callback.
+
+When an event occurs, the coderef is passed a hashref representing the
+event.
+
+=item conv - A coderef, used as a conversation callback.
+
+This callback is called when a question should be asked to the user.
+It is passed a hashref representing the question.  The callback
+returns 1 or 0 to answer yes or no.
+
+=item progress - A coderef, used as a progress callback.
+
+This callback is called to report on the progress of the operations
+of the transaction.
+
+=back
+
+Callbacks are explained in greater detail in the L<ALPM::Transaction>
+document.
+
 =head1 ERRORS
 
 Global ALPM errors are thrown with C<croak>.  The error messages match
 the errors that the C library provides.  These errors are prefixed
-with C<ALPM Error: >.  Errors that occur when using a ALPM::DB object
-are prefixed with C<ALPM DB Error: >.
+with C<ALPM Error:>.  Errors that occur when using a ALPM::DB object
+are prefixed with C<ALPM DB Error:>.
 
-TODO: List of error messages.
+Transaction errors are prefixed with C<ALPM Transaction Error:>.
+These are described fully at L<ALPM::Transaction>.
 
 =head1 TROUBLESHOOTING
 
-TODO: Common error messages and how to fix them.
+TODO: Common error messages and how to fix them?
+
+=head1 TODO
+
+Unimplemented functions:
+
+  alpm_depcmp, alpm_checkdeps, alpm_deptest, alpm_dep_compute_string,
+  alpm_trans_interrupt, alpm_checkconflicts, alpm_compute_md5sum,
+  alpm_sync_newversion, alpm_delta_... functions
 
 =head1 SEE ALSO
 
@@ -281,15 +438,13 @@ TODO: Common error messages and how to fix them.
 
 =item * L<http://code.toofishes.net/pacman/doc/> - libalpm doxygen docs
 
-=item * L<libalpm>(8) (pretty sparse)
-
 =item * L<pacman>(8)
 
 =back
 
 =head1 AUTHOR
 
-Justin Davis, C<< <jrcd83 at gmail dot com> >>
+Justin Davis, C<< <jrcd83 at gmail> >>
 
 =head1 COPYRIGHT AND LICENSE
 

@@ -1,7 +1,7 @@
 --- #YAML:1.0
 name:               ALPM
-version:            0.03
-abstract:           XS module, OO wrapper of libalpm, Archlinux's packaging system
+version:            0.04
+abstract:           XS module for libalpm (ArchLinux Package Manager)
 author:
     - Justin Davis <jrcd at gmail dot com>
 license:            unknown
