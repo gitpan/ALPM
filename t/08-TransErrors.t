@@ -2,7 +2,7 @@
 
 use warnings;
 use strict;
-use Test::More qw(no_plan);
+use Test::More tests => 31;
 
 use File::Spec::Functions qw(rel2abs);
 use ALPM qw(t/test.conf);
@@ -71,9 +71,6 @@ undef $t;
 
 # Corrupt Packages ###########################################################
 
-my $arch = `uname -m`;
-chomp $arch;
-
 $t = ALPM->transaction( type => 'sync' );
 ok $t->add( 'corruptme' );
 ok $t->prepare;
@@ -82,7 +79,7 @@ like $@, qr/^ALPM Transaction Error: invalid or corrupted package/,
     'a corrupted package exception was raised';
 is $t->{error}{type}, 'invalid_package';
 is $t->{error}{msg}, 'invalid or corrupted package';
-is $t->{error}{list}[0], "corruptme-1.0-1-$arch.pkg.tar.gz";
+like $t->{error}{list}[0], qr/\Qcorruptme-1.0-1-any.pkg.tar.\E[gx]z/;
 is scalar @{ $t->{error}{list} }, 1;
 
 # Deltas ??? #################################################################

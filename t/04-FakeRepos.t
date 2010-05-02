@@ -3,15 +3,13 @@ use warnings;
 use strict;
 use Test::More tests => 5;
 
-use Data::Dumper;
-
 use ALPM;
 use Cwd;
 use English qw( -no_match_vars );
 use File::Find;
 use File::Copy;
-use File::Path;
-use File::Spec::Functions qw(rel2abs);
+use File::Path qw( make_path remove_tree );
+use File::Spec::Functions qw( rel2abs catfile );
 
 my $REPOS_BUILD = rel2abs('t/repos/build');
 my $REPOS_SHARE = rel2abs('t/repos/share');
@@ -37,93 +35,78 @@ LogFile  = $TEST_ROOT/test.log
 
 END_CONF
 
-#     for my $repo ( @repos ) {
-#         print $conf_file <<"END_REPO";
-# [$repo]
-# Server   = file://$REPOS_SHARE/$repo
-
-# END_REPO
-#     }
-
     close $conf_file;
 }
 
 sub create_adder
 {
     my ($repo_name) = @_;
-
-    my $reposhare = "$REPOS_SHARE/$repo_name";
+    my $reposhare   = "$REPOS_SHARE/$repo_name";
 
     return sub {
-        return unless /[.]pkg[.]tar[.]gz$/;
-        system 'repo-add', "$reposhare/$repo_name.db.tar.gz",
-            $File::Find::name
+        return unless /[.]pkg[.]tar[.](?:xz|gz)$/;
+        system 'repo-add', "$reposhare/$repo_name.db.tar.gz", $File::Find::name
                 and die "error ", $? >> 8, " with repo-add in $REPOS_SHARE";
-        copy( $_, "$reposhare/$_" );
+        rename $_, "$reposhare/$_";
     }
 }
 
 sub create_repos
 {
+    local $ENV{PKGDEST} = undef;
+
     opendir BUILDDIR, $REPOS_BUILD
         or die "couldn't opendir on $REPOS_BUILD: $!";
 
+    my $makepkg_opts = join q{ }, qw/ -f -d -c /,
+      ( $EFFECTIVE_USER_ID == 0 ? '--asroot' : qw// );
+
     chdir $REPOS_BUILD;
     my @repos = grep { !/[.]{1,2}/ && -d $_ } readdir BUILDDIR;
+    # Loop through each repository's build directory...
     for my $repodir ( @repos ) {
         opendir REPODIR, "$REPOS_BUILD/$repodir"
             or die "couldn't opendir on $REPOS_BUILD/$repodir";
         chdir "$REPOS_BUILD/$repodir"
             or die qq{cannot chdir to repodir "$repodir"};
 
+        # Create each package, which is a PKGBUILD in a each subdir...
         for my $pkgdir ( grep { !/[.]{1,2}/ && -d $_ } readdir REPODIR ) {
             chdir "$REPOS_BUILD/$repodir/$pkgdir"
                 or die qq{cannot chdir to pkgdir "$pkgdir"};
 
-            my $opts = join q{ }, qw/ -f -d /,
-                ( $EFFECTIVE_USER_ID == 0 ? '--asroot' : qw// );
-
-            system "makepkg $opts >/dev/null 2>&1"
+            system "makepkg $makepkg_opts >/dev/null 2>&1"
                 and die 'error code ', $? >> 8, ' from makepkg in $pkgdir: ';
         }
         closedir REPODIR;
 
-        mkpath( "$REPOS_SHARE/$repodir" );
+        # Move each repo's package to the share dir and add it to the
+        # repo's db.tar.gz file...
+        make_path( "$REPOS_SHARE/$repodir", { mode => 0755 } );
         find( create_adder( $repodir ), "$REPOS_BUILD/$repodir" );
     }
 
     return @repos;
 }
 
-# Don't need this since I got DB::update() to work.
-# (use absolute paths for everything)
-sub copy_sync_db
-{
-    chdir $start_dir;
-    mkpath( "$TEST_ROOT/db/sync/simpletest" )
-        or die "mkpath for simpltest db failed: $!";
-    system 'tar', ( '-zxf' => "$REPOS_SHARE/simpletest.db.tar.gz",
-                    '-C'   => "$TEST_ROOT/db/sync/simpletest/" )
-        and die "error ", $? >> 8, " when untarring db tarball failed";
-}
-
 sub clean_root
 {
     die "WTF?" if $TEST_ROOT eq '/';
 
-    rmtree( $TEST_ROOT );
-    mkpath( "$TEST_ROOT/db/local", "$TEST_ROOT/db/sync",
-            "$TEST_ROOT/cache", );
+    remove_tree( $TEST_ROOT, { keep_root => 1 } );
+    make_path( "$TEST_ROOT/db/local", "$TEST_ROOT/db/sync",
+	       "$TEST_ROOT/cache", { mode => 0755 } );
     return 1;
 }
 
 sub corrupt_package
 {
-    my $arch = `uname -m`;
-    chomp $arch;
-
-    my $fqp = rel2abs( "$REPOS_SHARE" )
-        . "/simpletest/corruptme-1.0-1-$arch.pkg.tar.gz";
+    my ($fqp) = ( grep { -f $_ }
+                  map {
+                      catfile( rel2abs( "$REPOS_SHARE" ),
+                                q{simpletest},
+                               qq{corruptme-1.0-1-any.pkg.tar.$_} );
+                  } qw/ xz gz / );
 
     unlink $fqp or die "failed to unlink file whilst corrupting: $!";
 
@@ -143,7 +126,11 @@ SKIP:
     my @repos = create_repos();
     ok( @repos, 'create test package repository' );
 
-    diag( "created @repos test repositories" );
+    @repos = map { qq{'$_'} } @repos;
+    my $repos_list = join q{ and },
+      ( join q{, }, @repos[0 .. $#repos-1] ), $repos[-1];
+
+    diag( "created $repos_list repos" );
 
     corrupt_package();
 }
@@ -158,9 +145,10 @@ ok( ALPM->load_config( $TEST_CONF ), 'load our generated config' );
 #ALPM->set_opt( 'logcb', sub { printf STDERR '[%10s] %s', @_; } );
 
 for my $reponame ( 'simpletest', 'upgradetest' ) {
-    ok( my $db = ALPM->register_db( $reponame,
-                           sprintf( 'file://%s/%s', rel2abs( $REPOS_SHARE ),
-                                    $reponame )) );
+    my $repopath = sprintf( 'file://%s/%s',
+			    rel2abs( $REPOS_SHARE ),
+			    $reponame );
+    ok( my $db = ALPM->register_db( $reponame, $repopath ));
     $db->update;
 }
 

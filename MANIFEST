@@ -16,6 +16,7 @@ t/05-Transaction.t
 t/06-Callbacks.t
 t/07-TiedOptions.t
 t/08-TransErrors.t
+t/09-PackageFree.t
 t/repos/build/upgradetest/foo/PKGBUILD
 t/repos/build/upgradetest/replacebaz/PKGBUILD
 t/repos/build/simpletest/bar/PKGBUILD
@@ -29,8 +30,8 @@ lib/ALPM.pod
 lib/ALPM/DB.pm
 lib/ALPM/DB.pod
 lib/ALPM/Package.pm
-lib/ALPM/PackageFree.pm
 lib/ALPM/LoadConfig.pm
 lib/ALPM/Transaction.pm
 lib/ALPM/Group.pm
-META.yml
+MANIFEST.SKIP
+META.yml                                 Module meta-data (added by MakeMaker)
