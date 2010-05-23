@@ -11,12 +11,11 @@ use English      qw(-no_match_vars);
 use Carp         qw(carp croak confess);
 
 use ALPM::Transaction;
-use ALPM::PackageFree;
 use ALPM::Package;
 use ALPM::Group;
 use ALPM::DB;
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 # constants are only used internally... they are ugly.
 sub AUTOLOAD {
