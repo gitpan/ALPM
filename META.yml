@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               ALPM
-version:            0.07
+version:            0.08
 abstract:           XS module for libalpm (ArchLinux Package Manager)
 author:
     - Justin Davis <juster at cpan dot org>

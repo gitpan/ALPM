@@ -10,8 +10,8 @@ use Carp qw(croak);
 my %_PKG_ATTRIBS = map { /^has_(.*)$/ ? ( $1 => $_ ) : ( $_ => $_ ) }
     qw { filename name version desc url
          builddate installdate packager md5sum
-         arch size isize reason licenses
-         groups depends optdepends conflicts
+         arch size isize reason licenses requiredby
+         groups depends optdepends conflicts 
          provides deltas replaces files backup
          has_scriptlet has_force download_size };
 
@@ -69,7 +69,7 @@ ALPM::Package - ALPM package class.
 =head1 SYNOPSIS
 
   use ALPM qw( /etc/pacman.conf );
-  my $perlpkg = ALPM->local_db->get_pkg('perl');
+  my $perlpkg = ALPM->localdb->find('perl');
 
   # TMTOWTDI!
 
@@ -82,7 +82,7 @@ ALPM::Package - ALPM package class.
   my $attrs_ref = $perlpkg->attribs_ref();
   print "attrs_ref->{name} rocks!\n";
 
-  # Dependencies are given as array of hashrefs:
+  # Dependencies are given as arrayrefs of hashrefs (AoH):
   print "$name depends on:\n";
   for my $dep ( @{ $perlpkg->depends() } ) {
       my @words = @{$dep}{'name', 'mod', 'ver'};
@@ -106,10 +106,11 @@ There are three basic ways to access an attribute.  You can use the
 accessor method that is specific to an attribute, you can use the
 C<attr> method, or you can use the C<attribs> method.
 
-=head2 ATTRIBUTE ACCESSORS
+=head2 Attribute Accessors
 
-The accessors are named exactly the same as the C<alpm_pkg_get...>
-functions.  They are easy to use if you only want a few attributes.
+The accessors are named I<(almost)> exactly the same as the
+C<alpm_pkg_get...> functions.  They are easy to use if you only want a
+few attributes.
 
 I have removed the get_ prefix on the accessors.  This is because you
 can't really I<set> anything so you should know it's a get anyways.
@@ -170,9 +171,13 @@ can't really I<set> anything so you should know it's a get anyways.
 
 =item * changelog
 
+=item * requiredby
+
 =back
 
 Attributes with plural names return an arrayref of strings.
+
+=head3 Dependency Lists
 
 depends is different because it returns an arrayref of hashrefs
 (an AoH).  The hash has the following key-value pairs:

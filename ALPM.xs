@@ -256,7 +256,7 @@ static SV * convert_trans_errors ( alpm_list_t * errors )
 
     /* fprintf( stderr, "Left switch statement\n" ); */
 
-#undef MAPLIST
+#undef MAPERRLIST
 #undef convert_invalid_delta
 #undef pminvalid_delta_t
 #undef free_invalid_delta_errors
@@ -1232,8 +1232,12 @@ alpm_pkg_vercmp(a, b)
     const char *b
 
 StringListFree
-alpm_pkg_compute_requiredby(pkg)
+alpm_pkg_requiredby(pkg)
     ALPM_Package pkg
+  CODE:
+    RETVAL = alpm_pkg_compute_requiredby(pkg);
+  OUTPUT:
+    RETVAL
 
 const char *
 alpm_pkg_filename(pkg)

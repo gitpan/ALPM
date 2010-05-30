@@ -3,14 +3,15 @@ package ALPM::LoadConfig;
 use warnings;
 use strict;
 
-use IO::Handle;
-use English qw(-no_match_vars);
-use Carp    qw(croak);
-use ALPM;
+use List::Util qw();
+use IO::Handle qw();
+use English    qw(-no_match_vars);
+use Carp       qw();
+use ALPM       qw();
 
-####----------------------------------------------------------------------
-#### GLOBALS
-####----------------------------------------------------------------------
+##------------------------------------------------------------------------
+## GLOBALS
+##------------------------------------------------------------------------
 
 my %_CFG_OPTS =
     qw{ RootDir   root       CacheDir     cachedirs    DBPath      dbpath
@@ -26,9 +27,9 @@ my $COMMENT_MATCH = qr/ \A \s* [#] /xms;
 my $SECTION_MATCH = qr/ \A \s* [[] (\w+) []] \s* \z /xms;
 my $FIELD_MATCH   = qr/ \A \s* (\w+) \s* = \s* ([^\n]*) /xms;
 
-####----------------------------------------------------------------------
-#### PRIVATE FUNCTIONS
-####----------------------------------------------------------------------
+##------------------------------------------------------------------------
+## PRIVATE FUNCTIONS
+##------------------------------------------------------------------------
 
 sub _null_sub
 {
@@ -60,7 +61,8 @@ sub _make_parser
                     $hooks->{section}->($section_name);
                     return;
                 }
-                elsif ( my ($field_name, $field_val) = $line =~ /$FIELD_MATCH/ ) {
+                elsif ( my ($field_name, $field_val) =
+                        $line =~ /$FIELD_MATCH/ ) {
                     return unless $field_val;
 
                     # Not sure if I should warn or not...
@@ -70,13 +72,14 @@ sub _make_parser
                     $hooks->{field}{$field_name}->( $field_val );
                     return;
                 }
-                die "Invalid line in config file, not a comment, section, or field\n";
+                die "Invalid line in config file, not a comment, section, " .
+                    "or field\n";
             };
 
             # Print the offending file and line number along with any errors...
             # (This is why we use dies with newlines, for cascading error msgs)
             die "$EVAL_ERROR$path:${\$cfg_file->input_line_number()} $line\n"
-                if ($EVAL_ERROR);
+                if ( $EVAL_ERROR );
         };
 
     return
@@ -94,7 +97,6 @@ sub _register_db
     my ($url, $section) = @_;
     die qq{Section has not previously been declared, cannot set URL\n}
         unless ( $section );
-    #print STDERR "DEBUG: \$section = $section -- \$url = $url\n";
     ALPM->register_db( $section => $url );
     return;
 }
@@ -107,14 +109,29 @@ sub _set_defaults
                         logfile     => '/var/log/pacman.log', });
 }
 
-####----------------------------------------------------------------------
-#### PUBLIC METHODS
-####----------------------------------------------------------------------
+##------------------------------------------------------------------------
+## PUBLIC METHODS
+##------------------------------------------------------------------------
 
 sub new
 {
     my $class = shift;
-    bless do { my $anon_scalar; \$anon_scalar; }, $class;
+
+    Carp::croak( "Invalid arguments to ALPM::LoadConfig::new.\n" .
+                 'Arguments must be a hash' )
+        unless @_ % 2 == 0;
+
+    my %params = @_;
+    my $custom_fields_ref = $params{ custom_fields };
+
+    Carp::croak( "Invalid arguments to ALPM::LoadConfig::new.\n" .
+                 'Hash argument must have coderefs as values' )
+        if List::Util::first { ref $_ ne 'CODE' }
+            values %{ $custom_fields_ref };
+
+    bless { custom_fields => $custom_fields_ref,
+            auto_register => $params{ 'auto_register' } || 1,
+           }, $class;
 }
 
 sub load_file
@@ -127,12 +144,13 @@ sub load_file
     my $include_hooks =
     { section => sub {
           my $file = shift;
-          die qq{Section declaration is not allowed in Include-ed file\n($file)\n};
+          die  q{Section declaration is not allowed in } .
+              qq{Include-ed file\n($file)\n};
       },
-      field  => { Server => sub {
-                      my $server_url = shift;
-                      _register_db( $server_url, $current_section )
-                  } },
+      field   => { Server => sub {
+                       my $server_url = shift;
+                       _register_db( $server_url, $current_section )
+                   } },
      };
 
     my $field_hooks =
@@ -141,64 +159,63 @@ sub load_file
          my $field_name = $_;
          my $opt_name   = $_CFG_OPTS{$_};
          # create hash of field names to hooks
-         $_ => ( $opt_name =~ /s$/ ? 
-                 sub { # plural options get set arrayref values
+         $_ => ( $opt_name =~ /s\z/ ? 
+
+                 # plural options get set arrayref values
+                 sub { 
                      my $cfg_value = shift;
-                     die "$field_name can only be set in the [options] section\n"
-                         unless ( $current_section eq 'options' );
-                     #print STDERR "DEBUG: setting $opt_name to [ $cfg_value ]\n";
+                     die qq{$field_name can only be set in the} .
+                         qq{[options] section\n}
+                             unless ( $current_section eq 'options' );
                      ALPM->set_opt( $opt_name, [ split /\s+/, $cfg_value ] );
                  }
+
                  :
-                 sub { # singular options get scalar values
+
+                 # singular options get scalar values
+                 sub {
                      my $cfg_value = shift;
-                     die "$field_name can only be set in the [options] section\n"
-                         unless ( $current_section eq 'options' );
-                     #print STDERR "DEBUG: setting $opt_name to $cfg_value\n";
+                     die qq{$field_name can only be set in the } .
+                         qq{[options] section\n}
+                             unless ( $current_section eq 'options' );
                      ALPM->set_opt( $opt_name, $cfg_value );
                  }
                 )
      } keys %_CFG_OPTS ),
 
-#      DBPath    => sub {
-#          my $db_path = shift;
-#          die "DBPath can only be set in the [options] section\n"
-#              unless ( $current_section eq 'options' );
-#          #print STDERR "DEBUG: setting $opt_name to $cfg_value\n";
-#          ALPM->set_opt( 'dbpath', $db_path );
-#          ALPM->register_db;
-#      },
-
      # these fields do nothing, for now...
      ( map { ( $_ => \&_null_sub ) } @NULL_OPTS ),
 
-     Server    => sub { _register_db(shift, $current_section) },
-     Include   => sub {
+     Server  => sub { _register_db( shift, $current_section ) },
+     Include => sub {
          die "Cannot have an Include directive in the [options] section\n"
              if ( $current_section eq 'options' );
 
          # An include directive spawns its own little parser...
-         my $inc_path = shift;
-         #print STDERR "DEBUG: Include-ing $inc_path\n";
+         my $inc_path   = shift;
          my $parser_ref = _make_parser( $inc_path, $include_hooks );
          $parser_ref->();
-     }
-     };
+     },
+
+     # aaaand SHAZAM! customize!
+     %{ $self->{'custom_fields'} },
+    }; # end of field_hooks hashref brackets
 
     # Now we have hooks for parsing the main config file...
-    my $parser_hooks =
-    { field   => $field_hooks,
-      section => sub { $current_section = shift; }};
-                       #print STDERR "DEBUG: found section $current_section\n"; }};
+    my $parser_hooks = { field   => $field_hooks,
+                         section => sub { $current_section = shift;}
+                        };
 
     # Load default values like pacman does...
     _set_defaults();
 
-    my $parser_ref = _make_parser( $cfg_path, $parser_hooks );
-    my $ret = $parser_ref->();
+    _make_parser( $cfg_path, $parser_hooks )->();
 
-    if ( $ret ) { ALPM->register_db; } # register local db
-    return $ret;
+    if ( $self->{'auto_register'} ) {
+        ALPM->register( 'local' );
+    }
+
+    return;
 }
 
 1;
@@ -207,7 +224,7 @@ __END__
 
 =head1 NAME
 
-ALPM::LoadConfig - pacman.conf config file parser
+ALPM::LoadConfig - pacman.conf config file parsing class.
 
 =head1 SYNOPSIS
 
@@ -217,11 +234,66 @@ ALPM::LoadConfig - pacman.conf config file parser
   # At runtime:
   ALPM->load_config('/etc/pacman.conf');
 
+  # Load custom fields as well:
+  my $value;
+  my %fields = ( 'CustomField' => sub { $value = shift } );
+  my $loader = ALPM::LoadConfig->new( custom_fields => \%fields,
+                                      auto_register => 0 );
+  $loader->load_file( '/etc/pacman.conf' );
+
 =head1 DESCRIPTION
 
 This class is used internally by ALPM to parse pacman.conf config
-files.  The settings are used to set ALPM options.  You don't need to
-use this module directly.
+files.  The settings are used to set ALPM options.  You probably don't
+need to use this module directly.
+
+=head1 CONSTRUCTOR
+
+=head2 new
+
+ $OBJ = ALPM::LoadConfig->new( custom_fields => $FIELDS_REF,
+                               auto_register => $AUTO_REGISTER );
+
+=head3 Parameters
+
+=over 4
+
+=item C<$FIELDS_REF> I<(Hash Reference)>
+
+Keys are field names from the C</etc/pacman.conf> configuration file.
+Values are code references.  When a field is found inside the
+configuration file with the I<exact same> name, then the code
+reference is called, passed the value of the entry as the only
+argument.
+
+=item C<$AUTO_REGISTER>
+
+Normally, LoadConfig will automatically call C<ALPM->register_db( 'local' )>
+to register the local database after it has read the config file.  If you
+want to override certain ALPM settings immediately after reading the config
+file you will have to turn this feature off.  This is used as a boolean
+value, set it to 0 to disable automatic localdb registering.
+
+=back
+
+=head1 METHODS
+
+=head2 load_config
+
+ undef = $OBJ->load_config( $CFG_FILE_PATH )
+
+This method will read a configuration file, setting ALPM options as it
+goes.
+
+=head3 Parameters
+
+=over 4
+
+=item C<$CFG_FILE_PATH>
+
+The path to the configuration file to read.
+
+=back
 
 =head1 SEE ALSO
 
