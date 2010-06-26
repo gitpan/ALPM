@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 use warnings;
 use strict;
-use Test::More tests => 10;
+use Test::More tests => 13;
 
 use File::Spec::Functions qw(rel2abs);
 use ALPM qw(t/test.conf);
@@ -38,12 +38,12 @@ sub check_events
 ok( ALPM->register_db( 'simpletest',
                        'file://' . rel2abs( 't/repos/share/simpletest' )) );
 
-ok( my $t = ALPM->transaction( type => 'sync', event => \&event_log ),
+ok( my $t = ALPM->transaction( event => \&event_log ),
    'create a sync transaction' );
 
-ok( $t->add( 'foo' ), 'add foo package to transaction' );
+ok( $t->sync( 'foo' ), 'add foo package to transaction' );
 
-eval { $t->add('nonexistantpackage') };
+eval { $t->sync('nonexistantpackage') };
 like( $@, qr/^ALPM Error: could not find or read package/,
       'cannot load a non-existing package' );
 
@@ -53,16 +53,18 @@ check_events( qw/resolvedeps interconflicts/ ),
 
 ok( $t->prepare, 'redundant prepare is ignored' );
 
-eval { $t->add('packageafterprepare') };
-like( $@, qr/^ALPM Error: cannot add to a prepared transaction/,
-      'add fails after preparing transaction' );
+eval { $t->sync('foo') };
+like( $@, qr/duplicate target/,
+      'cannot sync the same package twice' );
 
 ok( $t->commit, 'commit the transaction' );
 
 check_events( qw/integrity fileconflicts add/ );
 
-$t = undef;
+undef $t;
 
-# ok( $t = ALPM->transaction( type => 'sync' ) );
-# ok( $t->add('bar') );
-# ok( $t->commit );
+$t = ALPM->transaction( flags => 'cascade dbonly dlonly' );
+my $flags = $t->get_flags;
+like( $flags, qr/cascade/ );
+like( $flags, qr/dbonly/  );
+like( $flags, qr/dlonly/  );

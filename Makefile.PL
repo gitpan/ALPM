@@ -24,13 +24,15 @@ WriteMakefile
       LICENSE           => 'perl',
       ABSTRACT_FROM     => 'lib/ALPM.pod',
       AUTHOR            => 'Justin Davis <juster at cpan dot org>',
-      LIBS              => ['-lalpm'],
+      LIBS              => [ '-lalpm' ],
       META_MERGE        =>
       { resources =>
         { repository => 'http://github.com/juster/perl-alpm' }},
       clean             => { FILES  => 't/root t/repos/share const-*.inc' },
 	# Un-comment this if you add C files to link with later:
-    # OBJECT            => '$(O_FILES)', # link all the C files too
+#      OBJECT            => '$(O_FILES)', # link all the C files too
+      OBJECT            => 'ALPM.o convert.o callbacks.o',
+      XS                => { 'ALPM.xs' => 'ALPM.c' },
 );
 
 if  (eval {require ExtUtils::Constant; 1}) {
@@ -41,11 +43,6 @@ if  (eval {require ExtUtils::Constant; 1}) {
   my @names = map { +{ name => $_, macro => 1 } }
       (qw(PM_PKG_REASON_EXPLICIT
           PM_PKG_REASON_DEPEND
-
-          PM_TRANS_TYPE_UPGRADE
-          PM_TRANS_TYPE_REMOVE
-          PM_TRANS_TYPE_REMOVEUPGRADE
-          PM_TRANS_TYPE_SYNC
 
           PM_TRANS_FLAG_NODEPS
           PM_TRANS_FLAG_FORCE
@@ -148,6 +145,7 @@ if  (eval {require ExtUtils::Constant; 1}) {
           PM_ERR_PKG_OPEN
           PM_ERR_PKG_CANT_REMOVE
           PM_ERR_PKG_INVALID_NAME
+          PM_ERR_PKG_INVALID_ARCH
           PM_ERR_PKG_REPO_NOT_FOUND
 
           PM_ERR_DLT_INVALID

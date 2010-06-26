@@ -1,7 +1,7 @@
 --- #YAML:1.0
 name:               ALPM
-version:            0.08
-abstract:           XS module for libalpm (ArchLinux Package Manager)
+version:            1.00
+abstract:           ArchLinux Package Manager backend library.
 author:
     - Justin Davis <juster at cpan dot org>
 license:            perl
@@ -19,25 +19,16 @@ build_requires:
     Net::Ping:            0
     Time::HiRes:          0
 requires:
-    Carp:                 0
-    Cwd:                  0
-    English:              0
-    File::Basename:       0
-    File::Copy:           0
-    File::Find:           0
-    File::Path:           2.06_05
-    File::Spec::Functions:  0
-    File::stat:           0
-    Net::Ping:            0
-    Scalar::Util:         0
-    Time::HiRes:          0
+    Carp:          0
+    English:       0
+    Scalar::Util:  0
 resources:
     repository:  http://github.com/juster/perl-alpm
 no_index:
     directory:
         - t
         - inc
-generated_by:       ExtUtils::MakeMaker version 6.55_02
+generated_by:       ExtUtils::MakeMaker version 6.56
 meta-spec:
     url:      http://module-build.sourceforge.net/META-spec-v1.4.html
     version:  1.4

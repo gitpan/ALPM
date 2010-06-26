@@ -8,7 +8,6 @@ ALPM_Group            T_ALPM_GROUP
 
 StringListFree        L_STRING_FREE
 StringListNoFree      L_STRING_NOFREE
-ListAutoFree          L_AUTO_FREE
 
 PackageListFree       L_PACKAGE_FREE
 PackageListNoFree     L_PACKAGE_NOFREE
@@ -19,6 +18,9 @@ GroupList             L_GROUP
 pmpkgreason_t         T_PKGREASON
 off_t                 T_INT
 
+#-----------------------------------------------------------------------------
+# INPUT # Perl ==> C
+#-----------------------------------------------------------------------------
 
 INPUT
 I_NEG_IS_ERROR
@@ -63,16 +65,6 @@ T_ALPM_GROUP
 	    Perl_croak(aTHX_ \"%s: %s is not of type %s\",
 			${$ALIAS?\q[GvNAME(CvGV(cv))]:\qq[\"$pname\"]},
 			\"$var\", \"ALPM::Group\")
-
-L_AUTO_FREE
-	if ( sv_derived_from($arg, \"ALPM::ListAutoFree\") ) {
-	    IV tmp = SvIV( (SV*)SvRV($arg) );
-	    $var = INT2PTR( $type,tmp );
-	}
-	else
-	    Perl_croak(aTHX_ \"%s: %s is not of type %s\",
-			${$ALIAS?\q[GvNAME(CvGV(cv))]:\qq[\"$pname\"]},
-			\"$var\", \"ALPM::Package\")
 
 L_PACKAGE_FREE
     if ( SvROK($arg) && SvTYPE(SvRV($arg)) == SVt_PVAV ) {
@@ -182,6 +174,49 @@ L_STRING_NOFREE
 			${$ALIAS?\q[GvNAME(CvGV(cv))]:\qq[\"$pname\"]},
 			\"$var\");
 
+T_PKGREASON
+    if ( SvIOK( $arg )) {
+        int i_reason;
+        i_reason = SvIV( $arg );
+
+        /* if the reason arg is a number it must be 0 or 1 */
+        if ( i_reason != 0 && i_reason != 1 ) {
+            croak( \"Reason must be 0 or 1 when given as a number\" );
+        }
+
+        $var = i_reason;
+    }
+    else if ( SvPOK( $arg )) {
+        char *str_reason;
+        STRLEN length;
+
+        /* if the reason arg is a string, it must be
+           'explicit' or 'implicit|depend' */
+        str_reason = SvPV( $arg, length );
+        if ( length != 8 && length != 6) {
+            /* might be a good time to use goto */
+            croak( \"Reason must be 'explicit', 'implicit', or 'depend' \"
+                   \"when given as a string\" );
+        }
+        else if ( strcmp( \"explicit\", str_reason ) == 0 ) {
+            $var = PM_PKG_REASON_EXPLICIT;
+        }
+        else if (    strcmp( \"implicit\", str_reason ) == 0
+                  || strcmp( \"depend\",   str_reason ) == 0 ) {
+            $var = PM_PKG_REASON_DEPEND;
+        }
+        else {
+            croak( \"Reason must be 'explicit', 'implicit', or 'depend' \"
+                   \"when given as a string\" );
+        }
+    }
+    else {
+        croak( \"Reason must be 0, 1, 'explicit', 'implicit', or 'depend'\" );
+    }
+
+#-----------------------------------------------------------------------------
+# OUTPUT # C ==> Perl
+#-----------------------------------------------------------------------------
 
 OUTPUT
 I_NEG_IS_ERROR
@@ -292,7 +327,6 @@ L_GROUP
             iter = iter->next;
         }
     }
-
 
 T_PKGREASON
     $arg = newSV(0);

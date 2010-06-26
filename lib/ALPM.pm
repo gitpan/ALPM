@@ -15,7 +15,7 @@ use ALPM::Package;
 use ALPM::Group;
 use ALPM::DB;
 
-our $VERSION = '0.08';
+our $VERSION = '1.00';
 
 # constants are only used internally... they are ugly.
 sub AUTOLOAD {
@@ -55,35 +55,29 @@ our $_Transaction;
 
 our @GET_SET_OPTS = qw{ root dbpath cachedirs logfile usesyslog
                         noupgrades noextracts ignorepkgs ignoregrps
-                        nopassiveftp logcb dlcb totaldlcb fetchcb };
+                        logcb dlcb totaldlcb fetchcb usedelta arch };
 
-our %_IS_SETOPTION = ( map { ( $_ => 1 ) } @GET_SET_OPTS, qw/ usedelta / );
-our %_IS_GETOPTION = ( map { ( $_ => 1 ) } @GET_SET_OPTS, qw/ lockfile localdb syncdbs / );
-
+our %_IS_SETOPTION = ( map { ( $_ => 1 ) } @GET_SET_OPTS );
+our %_IS_GETOPTION = ( map { ( $_ => 1 ) } @GET_SET_OPTS,
+                       qw/ lockfile localdb syncdbs / );
 
 ### Transaction Constants ###
-my %_TRANS_TYPES = ( 'upgrade'       => PM_TRANS_TYPE_UPGRADE(),
-                     'remove'        => PM_TRANS_TYPE_REMOVE(),
-                     'removeupgrade' => PM_TRANS_TYPE_REMOVEUPGRADE(),
-                     'sync'          => PM_TRANS_TYPE_SYNC(),
-                    );
-
-my %_TRANS_FLAGS = ( 'nodeps'      => PM_TRANS_FLAG_NODEPS(),
-                     'force'       => PM_TRANS_FLAG_FORCE(),
-                     'nosave'      => PM_TRANS_FLAG_NOSAVE(),
-                     'cascade'     => PM_TRANS_FLAG_CASCADE(),
-                     'recurse'     => PM_TRANS_FLAG_RECURSE(),
-                     'dbonly'      => PM_TRANS_FLAG_DBONLY(),
-                     'alldeps'     => PM_TRANS_FLAG_ALLDEPS(),
-                     'dlonly'      => PM_TRANS_FLAG_DOWNLOADONLY(),
-                     'noscriptlet' => PM_TRANS_FLAG_NOSCRIPTLET(),
-                     'noconflicts' => PM_TRANS_FLAG_NOCONFLICTS(),
-                     'needed'      => PM_TRANS_FLAG_NEEDED(),
-                     'allexplicit' => PM_TRANS_FLAG_ALLEXPLICIT(),
-                     'unneeded'    => PM_TRANS_FLAG_UNNEEDED(),
-                     'recurseall'  => PM_TRANS_FLAG_RECURSEALL(),
-                     'nolock'      => PM_TRANS_FLAG_NOLOCK(),
-                    );
+our %_TRANS_FLAGS = ( 'nodeps'      => PM_TRANS_FLAG_NODEPS(),
+                      'force'       => PM_TRANS_FLAG_FORCE(),
+                      'nosave'      => PM_TRANS_FLAG_NOSAVE(),
+                      'cascade'     => PM_TRANS_FLAG_CASCADE(),
+                      'recurse'     => PM_TRANS_FLAG_RECURSE(),
+                      'dbonly'      => PM_TRANS_FLAG_DBONLY(),
+                      'alldeps'     => PM_TRANS_FLAG_ALLDEPS(),
+                      'dlonly'      => PM_TRANS_FLAG_DOWNLOADONLY(),
+                      'noscriptlet' => PM_TRANS_FLAG_NOSCRIPTLET(),
+                      'noconflicts' => PM_TRANS_FLAG_NOCONFLICTS(),
+                      'needed'      => PM_TRANS_FLAG_NEEDED(),
+                      'allexplicit' => PM_TRANS_FLAG_ALLEXPLICIT(),
+                      'unneeded'    => PM_TRANS_FLAG_UNNEEDED(),
+                      'recurseall'  => PM_TRANS_FLAG_RECURSEALL(),
+                      'nolock'      => PM_TRANS_FLAG_NOLOCK(),
+                     );
 
 
 ####----------------------------------------------------------------------
@@ -91,9 +85,9 @@ my %_TRANS_FLAGS = ( 'nodeps'      => PM_TRANS_FLAG_NODEPS(),
 ####----------------------------------------------------------------------
 
 
-initialize();
+_initialize();
 
-END { release() };
+END { _release() };
 
 
 ####----------------------------------------------------------------------
@@ -280,8 +274,8 @@ sub register_db
     $sync_url =~ s/\$repo/$sync_name/g;
 
     # Set the server right away because function calls break in between...
-    my $new_db = db_register_sync($sync_name);
-    $new_db->set_server($sync_url);
+    my $new_db = _db_register_sync($sync_name);
+    $new_db->add_url($sync_url);
     return $new_db;
 }
 
@@ -293,7 +287,7 @@ sub localdb
     my $localdb = $class->get_opt('localdb');
 
     return $localdb if $localdb;
-    return db_register_local();
+    return _db_register_local();
 }
 
 sub syncdbs
@@ -330,7 +324,7 @@ sub search
 sub unregister_all_dbs
 {
     # Ignore our args since this should be called as a class method.
-    alpm_db_unregister_all();
+    _db_unregister_all();
 }
 
 sub load_config
@@ -356,7 +350,7 @@ sub load_pkgfile
     }
 
     my $package_path = shift;
-    return alpm_pkg_load( $package_path );
+    return _pkg_load( $package_path );
 }
 
 sub transaction
@@ -367,33 +361,8 @@ sub transaction
     croak 'arguments to transaction method must be a hash'
         unless ( @_ % 2 == 0 );
 
-    my %trans_opts = @_;
-    my ($trans_type, $trans_flags, $enable_downgrade) = (0) x 3;
-    my $sysupgrade;
-
-    # A type must be specified...
-    croak q{you must specify a 'type' in the hash arguments}
-        unless $trans_opts{type};
-
-    # Transactions of type sysupgrade use the alpm_trans_sysupgrade() func.
-    # We try to hide this difference with the same interface as normal
-    # transactions.
-    if ( $trans_opts{type} eq 'sysupgrade' ) {
-        $sysupgrade = 1;
-        $trans_opts{type} = 'sync';
-
-        if ( exists $trans_opts{flags} ) {
-            my @orig_flags = split /\s+/, $trans_opts{flags};
-            my @pruned_flags = grep { !/^(?:enable_)?downgrade$/ } @orig_flags;
-            if ( scalar @pruned_flags != scalar @orig_flags ) {
-                $enable_downgrade = 1;
-                $trans_opts{flags} = join ' ', @pruned_flags;
-            }
-        }
-    }
-
-    $trans_type = $_TRANS_TYPES{ $trans_opts{type} }
-        or croak qq{unknown transaction type "$trans_type"};
+    my %trans_opts  = @_;
+    my $trans_flags = 0;
 
     # Parse flags if they are provided...
     if ( exists $trans_opts{flags} ) {
@@ -405,11 +374,10 @@ sub transaction
     }
 
     eval {
-        alpm_trans_init( $trans_type, $trans_flags,
-                         $trans_opts{event},
-                         $trans_opts{conv},
-                         $trans_opts{progress});
-        alpm_trans_sysupgrade( $enable_downgrade ) if ( $sysupgrade );
+        _trans_init( $trans_flags,
+                     $trans_opts{event},
+                     $trans_opts{conv},
+                     $trans_opts{progress});
     };
     if ( $EVAL_ERROR ) {
         die "$EVAL_ERROR\n" unless ( $EVAL_ERROR =~ /\AALPM Error:/ );

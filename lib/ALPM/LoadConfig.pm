@@ -14,10 +14,10 @@ use ALPM       qw();
 ##------------------------------------------------------------------------
 
 my %_CFG_OPTS =
-    qw{ RootDir   root       CacheDir     cachedirs    DBPath      dbpath
-        LogFile   logfile    UseSyslog    usesyslog    UseDelta    usedelta
-        IgnorePkg ignorepkgs IgnoreGroup  ignoregrps   NoUpgrade   noupgrades
-        NoExtract noextracts NoPassiveFtp nopassiveftp };
+    qw{ RootDir   root       CacheDir     cachedirs    DBPath       dbpath
+        LogFile   logfile    UseSyslog    usesyslog    UseDelta     usedelta
+        IgnorePkg ignorepkgs IgnoreGroup  ignoregrps   NoUpgrade    noupgrades
+        NoExtract noextracts NoPassiveFtp nopassiveftp Architecture arch};
 
 # The following options are implemented in pacman and not ALPM so are ignored:
 my @NULL_OPTS = qw{ HoldPkg SyncFirst CleanMethod XferCommand
@@ -67,9 +67,10 @@ sub _make_parser
 
                     # Not sure if I should warn or not...
                     # warn qq{Unrecognized field named "$field_name"\n}
-                    #     unless ( exists $hooks->{field}{$field_name} );
+                    my $field_store = $hooks->{field}{$field_name}
+                        or return;
 
-                    $hooks->{field}{$field_name}->( $field_val );
+                    $field_store->( $field_val );
                     return;
                 }
                 die "Invalid line in config file, not a comment, section, " .

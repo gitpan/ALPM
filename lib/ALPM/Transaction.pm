@@ -15,37 +15,36 @@ sub new
     my %trans_opts = @_;
 
     bless { prepared => 0,
-            type     => $trans_opts{type},
             flags    => $trans_opts{flags},
-            event    => $trans_opts{event} }, $class;
+            event    => $trans_opts{event},
+           }, $class;
 }
 
-sub add
+sub get_flags
 {
-    my $self = shift;
+    my ($self) = @_;
 
-    # Transaction state gets messed up if we don't catch this...
-    croak 'ALPM Error: cannot add to a prepared transaction'
-        if ( $self->{prepared} );
-
-    ADD_LOOP:
-    for my $pkgname ( @_ ) {
-        if ( ref $pkgname ) {
-            carp 'target cannot be a reference, ignored';
-            next ADD_LOOP;
-        }
-
-        # Provide line numbers of calling script if an error occurred.
-        eval { alpm_trans_addtarget($pkgname); };
-        if ( $@ ) {
-            die "$@\n" unless ( $@ =~ /\AALPM Error:/ );
-
-            $@ =~ s/ at .*? line \d+[.]\n//;
-            croak $@;
-        }
+    my @flag_names;
+    my $raw_flags = _trans_get_flags();
+    FLAG_CHECK:
+    while ( my ($flagname, $flagmask) = each %ALPM::_TRANS_FLAGS ) {
+        next FLAG_CHECK unless $raw_flags & $flagmask;
+        push @flag_names, $flagname;
     }
 
-    return 1;
+    return wantarray ? @flag_names : join q{ }, @flag_names;
+}
+
+sub get_additions
+{
+    my ($self) = @_;
+    return @{ _trans_get_add() };
+}
+
+sub get_removals
+{
+    my ($self) = @_;
+    return @{ _trans_get_remove() };
 }
 
 1;
@@ -58,15 +57,15 @@ ALPM::Transaction - An object wrapper for transaction functions.
 
 =head1 SYNOPSIS
 
-  my $t = ALPM->transaction( type  => 'upgrade',
-                             flags => 'nodeps force',
+  my $t = ALPM->transaction( flags => 'nodeps force',
                              event => sub { ... },
                              conv  => sub { ... },
                              progress => sub { ... },
                             );
-  $t->add( qw/ perl perl-alpm / );
+  $t->sync( $_ ) for qw/ perl perl-alpm /;
   eval { $t->commit };
   if ( $EVAL_ERROR ) {
+      die unless $t->{error}; # re-throw an unknown error
       given ( $t->{error}{type} ) {
           when ( 'fileconflict' ) {
               for my $path ( @{ $t->{error}{list} } ) {
@@ -87,26 +86,264 @@ collected, the transaction is released.
 
 =head1 METHODS
 
-=head2 add
+=head2 sync
 
-  Usage   : $trans->add( 'perl', 'perl-alpm', 'etc' );
-  Purpose : Add package names to be affected by transaction.
-  Params  : A list of package names to be added (or just one).
-  Comment : You cannot add packages to a prepared transaction.
-  Returns : 1
+C<< $TRUE = $TRANS->sync( $PKGNAME ); >>
+
+Sync adds a package to synchronize via the database repos.  The
+package from the database repository is downloaded and installed.
+
+=head3 Parameters
+
+=over
+
+=item C<$PKGNAME>
+
+The name of a package.
+
+=back
+
+=head3 Returns
+
+=over
+
+=item C<$TRUE>
+
+The literal: 1
+
+=back
+
+=head2 pkgfile
+
+C<< $TRUE = $TRANS->pkgfile( $PKGPATH ); >>
+
+Adds a package file to be installed by the transaction.
+
+=head3 Parameters
+
+=over
+
+=item C<$PKGPATH>
+
+The path to the package file to install.
+
+=back
+
+=head3 Returns
+
+=over
+
+=item C<$TRUE>
+
+The literal: 1
+
+=back
+
+=head2 remove
+
+C<< $TRUE = $TRANS->remove( $PKGNAME ); >>
+
+Adds a package to be removed/uninstalled by the transaction.
+
+=head3 Parameters
+
+=over
+
+=item C<$PKGNAME>
+
+The name of a package.
+
+=back
+
+=head3 Returns
+
+=over
+
+=item C<$TRUE>
+
+The literal: 1
+
+=back
+
+=head2 sync_from_db
+
+C<< $TRUE = $TRANS->sync_from_db( $DBNAME, $PKGNAME ); >>
+
+Sync a package from the specified database.
+
+=head3 Parameters
+
+=over
+
+=item C<$DBNAME>
+
+The name of the database.
+
+=item C<$PKGNAME>
+
+The name of a package.
+
+=back
+
+=head3 Returns
+
+=over
+
+=item C<$TRUE>
+
+The literal: 1
+
+=back
+
+=head2 sysupgrade
+
+C<< $TRUE = $TRANS->sysupgrade( [$ENABLE_DOWNGRADE] ); >>
+
+Prepares a transaction for the actions it needs to perform
+a system upgrade.  A system upgrade will sync all the packages
+that are outdated in the local database.
+
+=head3 Parameters
+
+=over
+
+=item C<$ENABLE_DOWNGRADE>
+
+Whether to allow downgrading of packages.  If the version installed is
+greated than the version on the remote database, than the local
+version installed will still be replaced.
+
+Supply any argument in order to enable downgrading.  The value of the
+argument is not checked.  Do not supply an argument if you do
+not wish to enable downgrading.
+
+=back
+
+=head3 Returns
+
+=over
+
+=item C<$TRUE>
+
+The literal: 1
+
+=back
+
+=head2 get_flags
+
+C<< $FLAGSTR|@FLAGLIST = $TRANS->get_flags(); >>
+
+Returns a list or string representing the flags specified when
+creating the transaction with L<ALPM/transaction>.
+
+=head3 Parameters
+
+I<None>
+
+=head3 Returns
+
+=over
+
+=item C<$FLAGSTR>
+
+A string similar to the one used when creating the transaction.  The
+flags may be in a different order than originally passed to the
+L<ALPM/transaction> method.  This string is returned in
+scalar context.
+
+=item C<@FLAGLIST>
+
+A list of strings with each representing a flag.  This list is
+returned when in list context.
+
+=back
 
 =head2 prepare
 
-  Usage   : $trans->prepare;
-  Purpose : Prepares a transaction for committing.
-  Comment : commit() does this automatically if needed.
-  Returns : 1
+C<< $TRUE = $TRANS->prepare() >>
+
+Prepares a transaction.  The transaction will be checked for problems
+and could even throw an error.
+
+L</commit> checks if a transaction is prepared.  If not
+it calls this C<prepare> method automatically.
+
+=head3 Parameters
+
+I<None>
+
+=head3 Returns
+
+=over
+
+=item C<$TRUE>
+
+The literal: 1
+
+=back
 
 =head2 commit
 
-  Usage   : $trans->commit;
-  Purpose : Commits the transaction.
-  Returns : 1
+C<< $TRUE = $TRANS->commit(); >>
+
+Commits the transaction.  Actually performs the actions loaded into
+the transaction.
+
+=head2 Parameters
+
+I<None>
+
+=head2 Returns
+
+=over
+
+=item C<$TRUE>
+
+The literal: 1
+
+=back
+
+=head2 get_additions
+
+C<< @PKGS = $TRANS->get_additions(); >>
+
+This method will return a list of packages that are going to be
+installed by the transaction.
+
+=head3 Parameters
+
+I<None>
+
+=head3 Returns
+
+=over
+
+=item C<@PKGS>
+
+A list of L<ALPM::Package> objects.
+
+=back
+
+=head2 get_removals
+
+C<< @PKGS = $TRANS->get_removals(); >>
+
+This method will return a list of packages that are going to be
+uninstalled by the transaction.
+
+=head3 Parameters
+
+I<None>
+
+=head3 Returns
+
+=over
+
+=item C<@PKGS>
+
+A list of L<ALPM::Package> objects.
+
+=back
 
 =head1 RELEASING A TRANSACTION
 
@@ -116,7 +353,7 @@ For example:
 
   sub foo
   {
-      my $t = ALPM->transaction( type => 'sync' );
+      my $t = ALPM->transaction();
       ... do stuffs ...
   }
 
@@ -127,8 +364,8 @@ In this way, with good coding practices, you should not need to
 release a transaction because it will go out of scope.  But in order to
 explicitly release a transaction undefine it.  For example:
 
-  my $t = ALPM->transaction( type => 'sync' );
-  $t->add('perl');
+  my $t = ALPM->transaction();
+  $t->sync('perl');
   $t->commit;
   undef $t;
 
@@ -140,6 +377,28 @@ explicitly release a transaction undefine it.  For example:
 So be careful you don't keep extra copies of a transaction stored
 around or else it will not be released.  If you need extra copies
 try using C<weaken> in L<Scalar::Util>.
+
+=head2 DOUBLE TRANSACTION PROBLEM
+
+A problem can occur if you are trying to replace a transaction
+stored in a scalar with a new transaction:
+
+  my $t = ALPM->transaction();
+  $t->sync( 'perl' );
+  $t->commit();
+  $t = ALPM->transaction();  # THIS WILL FAIL!
+
+The problem is the C<$t> is not I<undefined> and released until after
+the C<<ALPM->transaction()>> call is finished.  Unfortunately the method
+cannot work because the previous transaction in C<$t> is not released
+yet!  Catch 22!  You will have to explicitly C<undef> the transaction
+in this case:
+
+  my $t = ALPM->transaction();
+  $t->sync( 'perl' );
+  $t->commit;
+  undef $t; # force release!
+  $t = ALPM->transaction();
 
 =head1 EVENT CALLBACKS
 
@@ -208,6 +467,13 @@ This always has 'status' set to the empty string.  There is also a
 This always has 'status' set to the empty string.  There is also a
 'name' key with the URI I guess?
 
+=item B<retrieve>
+
+This always has 'status' set to 'start'.  There is also a 'db'
+key which has the name (ex: "extra") of the database where the
+package is being retrieved from.
+
+
 =back
 
 =head1 CONVERSATION CALLBACKS
@@ -247,26 +513,25 @@ The following table shows what arguments are given for each named
 conversation event as well as the purpose of each named event.
 Arguments are simply additional keys in the hash ref.
 
-  |------------------+---------------------------------------------------|
-  | Name             | Description                                       |
-  |------------------+---------------------------------------------------|
-  | install_ignore   | Should the package be installed, and not ignored? |
-  | - package        | The package in question, an ALPM::Package object. |
-  |------------------+---------------------------------------------------|
-  | replace_package  | Should the old package be replaced by another?    |
-  | - old            | The old package, an ALPM::Package object.         |
-  | - new            | The new package, an ALPM::Package object.         |
-  | - db             | The name of the database's repository.            |
-  |------------------+---------------------------------------------------|
-  | package_conflict | Should the conflicting package be removed?        |
-  | - package        | The name of the package being conflicted.         |
-  | - removable      | The name of the removable package.                |
-  |------------------+---------------------------------------------------|
-  | corrupted_file   | Should the corrupted package file be deleted?     |
-  | - filename       | The name of the corrupted package file.           |
-  |------------------+---------------------------------------------------|
-
-=back
+  |------------------+------------------------------------------------|
+  | Name             | Description                                    |
+  |------------------+------------------------------------------------|
+  | install_ignore   | Should the package be installed or ignored?    |
+  | - package        | The package, an ALPM::Package object.          |
+  |------------------+------------------------------------------------|
+  | replace_package  | Should the old package be replaced by another? |
+  | - old            | The old package, an ALPM::Package object.      |
+  | - new            | The new package, an ALPM::Package object.      |
+  | - db             | The name of the database's repository.         |
+  |------------------+------------------------------------------------|
+  | package_conflict | Should the conflicting package be removed?     |
+  | - target         | The name of the package being conflicted.      |
+  | - local          | The name of the removable local package.       |
+  | - conflict       | The type/name of the conflict.                 |
+  |------------------+------------------------------------------------|
+  | corrupted_file   | Should the corrupted package file be deleted?  |
+  | - filename       | The name of the corrupted package file.        |
+  |------------------+------------------------------------------------|
 
 =head1 PROGRESS CALLBACKS
 
@@ -274,31 +539,31 @@ Progress of the transaction can be reported to a progress callback.
 Progress is reported as a hash reference, again.  The keys are
 described in the following table:
 
-  |-------------+------------------------------------------------------|
-  | Name        | Description                                          |
-  |-------------+------------------------------------------------------|
-  | id          | The numeric ID of the progress type.  Can be one of: |
-  |             | - PM_TRANS_PROGRESS_ADD_START                        |
-  |             | - PM_TRANS_PROGRESS_UPGRADE_START                    |
-  |             | - PM_TRANS_PROGRESS_REMOVE_START                     |
-  |             | - PM_TRANS_PROGRESS_CONFLICTS_START                  |
-  |-------------+------------------------------------------------------|
-  | name        | The string conversion of the numeric ID:             |
-  |             | - add                                                |
-  |             | - upgrade                                            |
-  |             | - remove                                             |
-  |             | - conflicts                                          |
-  |-------------+------------------------------------------------------|
-  | desc        | A string for extra description of the callback.      |
-  |             | For example, the name of the package being added.    |
-  |-------------+------------------------------------------------------|
-  | item        | The percentage of progress for the individual item.  |
-  |             | Like a package, for example.                         |
-  |-------------+------------------------------------------------------|
-  | total_count | The number of items being processed in total.        |
-  |-------------+------------------------------------------------------|
-  | total_pos   | The item's position in the total count above.        |
-  |-------------+------------------------------------------------------|
+  |-------------+-----------------------------------------------------|
+  | Name        | Description                                         |
+  |-------------+-----------------------------------------------------|
+  | id          | The numeric ID of the progress type.  Can be:       |
+  |             | - PM_TRANS_PROGRESS_ADD_START                       |
+  |             | - PM_TRANS_PROGRESS_UPGRADE_START                   |
+  |             | - PM_TRANS_PROGRESS_REMOVE_START                    |
+  |             | - PM_TRANS_PROGRESS_CONFLICTS_START                 |
+  |-------------+-----------------------------------------------------|
+  | name        | The string conversion of the numeric ID:            |
+  |             | - add                                               |
+  |             | - upgrade                                           |
+  |             | - remove                                            |
+  |             | - conflicts                                         |
+  |-------------+-----------------------------------------------------|
+  | desc        | A string for extra description of the callback.     |
+  |             | For example, the name of the package being added.   |
+  |-------------+-----------------------------------------------------|
+  | item        | The percentage of progress for the individual item. |
+  |             | Like a package, for example.                        |
+  |-------------+-----------------------------------------------------|
+  | total_count | The number of items being processed in total.       |
+  |-------------+-----------------------------------------------------|
+  | total_pos   | The item's position in the total count above.       |
+  |-------------+-----------------------------------------------------|
 
 =head1 ERRORS
 
@@ -317,38 +582,39 @@ Transaction Error:> prefix.  The array ref in I<list> is different
 depending on each type.  Each I<type> and its associated I<msg> and
 I<list> are described in the following table.
 
-  |-----------------+------------------------------------------------------|
-  | Type            | Description                                          |
-  |-----------------+------------------------------------------------------|
-  | fileconflict    | More than one package has a file with the same path. |
-  | - msg           | 'conflicting files'                                  |
-  | - list          | An arrayref of hashes representing the conflict:     |
-  | -- target       | The package which caused the conflict.               |
-  | -- type         | 'filesystem' or 'target'                             |
-  | -- file         | The path of the conflicting file.                    |
-  | -- ctarget      | Empty string ('') ?                                  |
-  |-----------------+------------------------------------------------------|
-  | depmissing      | A dependency could not be satisfied (missing?).      |
-  | - msg           | 'could not satisfy dependencies'                     |
-  | - list          | An arrayref of hashes represending the dep:          |
-  | -- target       | The depended on package name.                        |
-  | -- cause        | The package name of who depends on target.           |
-  | -- depend       | A hashref, same as dependencies of package objects.  |
-  |-----------------+------------------------------------------------------|
-  | depconflict     | A package which explicitly conflicts with another    |
-  |                 | (in the PKGBUILD) cannot be installed.               |
-  | - msg           | 'conflicting dependencies'                           |
-  | - list          | An arrayref of arrayrefs (AoA).                      |
-  |                 | Each element of the list is a pair of conflicts.     |
-  |-----------------+------------------------------------------------------|
-  | invalid_delta   | (UNTESTED) A delta is corrupted?                     |
-  | - msg           | ?                                                    |
-  | - list          | An arrayref of corrupted delta names.                |
-  |-----------------+------------------------------------------------------|
-  | invalid_package | A package is corrupted (or invalid?).                |
-  | - msg           | 'invalid or corrupted package'                       |
-  | - list          | An arrayref of package filenames.                    |
-  |-----------------+------------------------------------------------------|
+  |-----------------+--------------------------------------------------|
+  | Type            | Description                                      |
+  |-----------------+--------------------------------------------------|
+  | fileconflict    | Two packages share a file with the same path.    |
+  | - msg           | 'conflicting files'                              |
+  | - list          | An arrayref of hashes representing the conflict: |
+  | -- target       | The package which caused the conflict.           |
+  | -- type         | 'filesystem' or 'target'                         |
+  | -- file         | The path of the conflicting file.                |
+  | -- ctarget      | Empty string ('') ?                              |
+  |-----------------+--------------------------------------------------|
+  | depmissing      | A dependency could not be satisfied (missing?).  |
+  | - msg           | 'could not satisfy dependencies'                 |
+  | - list          | An arrayref of hashes represending the dep:      |
+  | -- target       | The depended on package name.                    |
+  | -- cause        | The package name of who depends on target.       |
+  | -- depend       | A hashref, same as dependencies of packages.     |
+  |-----------------+--------------------------------------------------|
+  | depconflict     | A package which explicitly conflicts with        |
+  |                 | another (in the PKGBUILD) cannot be installed.   |
+  | - msg           | 'conflicting dependencies'                       |
+  | - list          | An arrayref of hashrefs showing the conflict:    |
+  | -- reason       | A reason message.                                |
+  | -- packages     | An arrayref of two packages who conflict.        |
+  |-----------------+--------------------------------------------------|
+  | invalid_delta   | (UNTESTED) A delta is corrupted?                 |
+  | - msg           | ?                                                |
+  | - list          | An arrayref of corrupted delta names.            |
+  |-----------------+--------------------------------------------------|
+  | invalid_package | A package is corrupted (or invalid?).            |
+  | - msg           | 'invalid or corrupted package'                   |
+  | - list          | An arrayref of package filenames.                |
+  |-----------------+--------------------------------------------------|
 
 =head1 SEE ALSO
 
