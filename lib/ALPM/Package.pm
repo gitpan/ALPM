@@ -47,8 +47,7 @@ sub attribs
 {
     my $self = shift;
 
-    return [ map { $self->_attr($_) } @_ ]
-        if ( @_ > 0 );
+    return map { $self->_attr($_) } @_ if ( @_ > 0 );
 
     return map { ( $_ => $self->_attr($_) ) } keys %_PKG_ATTRIBS;
 }
@@ -182,14 +181,14 @@ Attributes with plural names return an arrayref of strings.
 depends is different because it returns an arrayref of hashrefs
 (an AoH).  The hash has the following key-value pairs:
 
-  |------+----------------------------------------|
-  | Key  | Value                                  |
-  |------+----------------------------------------|
-  | name | Package name of the dependency         |
-  | ver  | The version to compare the real one to |
-  | mod  | The modifier of the dependency         |
-  |      | ('==', '>=', '<=', '<', or '>')        |
-  |------+----------------------------------------|
+  |---------+----------------------------------------|
+  | Key     | Value                                  |
+  |---------+----------------------------------------|
+  | name    | Package name of the dependency         |
+  | version | The version to compare the real one to |
+  | mod     | The modifier of the dependency         |
+  |         | ('==', '>=', '<=', '<', or '>')        |
+  |---------+----------------------------------------|
 
 =head2 PERLISH METHODS
 
