@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               ALPM
-version:            1.01
+version:            1.02
 abstract:           ArchLinux Package Manager backend library.
 author:
     - Justin Davis <juster at cpan dot org>
