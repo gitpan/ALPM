@@ -15,7 +15,7 @@ use ALPM::Package;
 use ALPM::Group;
 use ALPM::DB;
 
-our $VERSION = '1.03';
+our $VERSION = '2.00';
 
 # constants are only used internally... they are ugly.
 sub AUTOLOAD {
@@ -65,6 +65,7 @@ our %_IS_GETOPTION = ( map { ( $_ => 1 ) } @GET_SET_OPTS,
 our %_TRANS_FLAGS = ( 'nodeps'      => PM_TRANS_FLAG_NODEPS(),
                       'force'       => PM_TRANS_FLAG_FORCE(),
                       'nosave'      => PM_TRANS_FLAG_NOSAVE(),
+                      'nodepver'    => PM_TRANS_FLAG_NODEPVERSION(),
                       'cascade'     => PM_TRANS_FLAG_CASCADE(),
                       'recurse'     => PM_TRANS_FLAG_RECURSE(),
                       'dbonly'      => PM_TRANS_FLAG_DBONLY(),
@@ -256,22 +257,29 @@ sub set_options
     return 1;
 }
 
-sub register_db
+sub register
 {
     my $class = shift;
 
-    if ( @_ == 0 || $_[0] eq 'local' ) {
-        return $class->localdb;
-    }
+    croak 'Supply a repository name and a base URL to start it at'
+        if @_ != 2;
 
     my ($sync_name, $sync_url) = @_;
 
-    croak 'You must supply a URL for the database'
-        unless ( defined $sync_url );
+    croak 'You must supply a URL for the database' unless $sync_url;
 
     # Replace the literal string '$repo' with the repo's name,
     # like in the pacman config file... bad idea maybe?
-    $sync_url =~ s/\$repo/$sync_name/g;
+    $sync_url =~ s/\$repo\b/$sync_name/g;
+
+    if ( $sync_url =~ /\$arch\b/ ) {
+        my $arch = ALPM->get_opt( 'arch' );
+        if ( !$arch || $arch eq 'auto' ) {
+            chomp( $arch = `uname -m` );
+            die 'Failed to call uname to expand $arch' if $? != 0
+        }
+        $sync_url =~ s/\$arch\b/$arch/g;
+    }
 
     # Set the server right away because function calls break in between...
     my $new_db = _db_register_sync($sync_name);
@@ -279,40 +287,32 @@ sub register_db
     return $new_db;
 }
 
-*register = \&register_db;
-
 sub localdb
 {
     my $class = shift;
-    my $localdb = $class->get_opt('localdb');
-
-    return $localdb if $localdb;
-    return _db_register_local();
+    return $class->get_opt('localdb');
 }
 
 sub syncdbs
 {
     my $class = shift;
-    my $syncdbs = $class->get_opt('syncdbs');
-    return @$syncdbs;
+    return @{ $class->get_opt('syncdbs') };
 }
 
-sub databases
+sub dbs
 {
     my $class = shift;
     return ( $class->localdb, $class->syncdbs );
 }
-*dbs = \&databases;
 
-sub repodb
+sub db
 {
     croak 'Not enough arguments to ALPM::repodb()' if ( @_ < 2 );
     my ($class, $repo_name) = @_;
 
-    my ($found) = grep { $_->name eq $repo_name } $class->databases;
+    my ($found) = grep { $_->name eq $repo_name } $class->dbs;
     return $found;
 }
-*db = \&repodb;
 
 sub search
 {
@@ -353,12 +353,12 @@ sub load_pkgfile
     return _pkg_load( $package_path );
 }
 
-sub transaction
+sub trans
 {
-    croak 'transaction() must be called as a class method' unless ( @_ );
+    croak 'trans() must be called as a class method' unless ( @_ );
     my $class = shift;
 
-    croak 'arguments to transaction method must be a hash'
+    croak 'arguments to trans method must be a hash'
         unless ( @_ % 2 == 0 );
 
     my %trans_opts  = @_;
@@ -392,7 +392,6 @@ sub transaction
     weaken $_Transaction;
     return $t;
 }
-*action = \&transaction;
 
 
 ####----------------------------------------------------------------------
@@ -458,8 +457,6 @@ sub NEXTKEY
              : undef );
 }
 
-
 1;
 
 __END__
-

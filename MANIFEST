@@ -1,4 +1,4 @@
-ChangeLog
+Changes
 Makefile.PL
 MANIFEST
 README
@@ -39,5 +39,8 @@ lib/ALPM/Package.pm
 lib/ALPM/LoadConfig.pm
 lib/ALPM/Transaction.pm
 lib/ALPM/Group.pm
+ex/ownzors
+ex/dangles
+ex/lspkg
 MANIFEST.SKIP
 META.yml                                 Module meta-data (added by MakeMaker)

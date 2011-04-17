@@ -15,7 +15,7 @@ ok( ALPM->set_options({ root        => '/',
                         logfile     => '/var/log/pacman.log', }) );
 
 
-ok( my $local = ALPM->register_db );
+ok( my $local = ALPM->localdb );
 
 is( $local->name, 'local' );
 
@@ -23,7 +23,7 @@ is( $local->find('lskdfjkbadpkgname'), undef );
 
 ok( $local->find('perl')->isa('ALPM::Package') );
 
-ok( scalar $local->packages > 1 );
+ok( scalar $local->pkgs   > 1 );
 ok( scalar $local->groups > 1 );
 #is( ref $local->search('perl'), 'ARRAY' );
 
@@ -43,11 +43,11 @@ SKIP:
     skip 'could not ping ftp.archlinux.org', 7 unless $success;
 
     my $name = 'core';
-    my $syncdb = ALPM->register_db( $name =>
-                                    'ftp://ftp.archlinux.org/$repo/os/i686' );
+    my $syncdb = ALPM->register( $name =>
+                                'ftp://ftp.archlinux.org/$repo/os/$arch' );
     ok( $syncdb );
     is( $syncdb->name, $name );
-    ok( scalar $syncdb->packages > 1 );
+    ok( scalar $syncdb->pkgs   > 1 );
     ok( scalar $syncdb->groups > 1 );
 
     ok( $syncdb->find('perl')->isa('ALPM::Package') );

@@ -19,7 +19,7 @@ const char * log_lvl_debug    = "debug";
 const char * log_lvl_function = "function";
 const char * log_lvl_unknown  = "unknown";
 
-void cb_log_wrapper ( pmloglevel_t level, char * format, va_list args )
+void cb_log_wrapper ( pmloglevel_t level, const char * format, va_list args )
 {
     SV *s_level, *s_message;
     char *lvl_str, buffer[256];
@@ -198,9 +198,9 @@ void cb_trans_event_wrapper ( pmtransevt_t event,
     sv_setref_pv( s_pkg, "ALPM::Package", (void *)pkgptr );     \
     hv_store( h_event, key, strlen(key), s_pkg, 0 );
 
-#define EVT_TEXT(key, text)    \
-    hv_store( h_event, key, 0, \
-              newSVpv( (char *)text, 0 ), 0 );
+#define EVT_TEXT(KEY, TEXT)    \
+    hv_store( h_event, KEY, strlen(KEY), \
+              newSVpv( (char *)TEXT, 0 ), 0 );
 
     switch ( event ) {
     case PM_TRANS_EVT_CHECKDEPS_START:
@@ -234,7 +234,6 @@ void cb_trans_event_wrapper ( pmtransevt_t event,
 	case PM_TRANS_EVT_INTERCONFLICTS_DONE:
         EVT_NAME("interconflicts")
         EVT_STATUS("done")
-        EVT_PKG("target", arg_one)
         break;
 	case PM_TRANS_EVT_ADD_START:
         EVT_NAME("add")
@@ -315,7 +314,15 @@ void cb_trans_event_wrapper ( pmtransevt_t event,
         EVT_NAME("retrieve")
         EVT_STATUS("start")
         EVT_TEXT("db", arg_one)
-        break;        
+        break;
+    case PM_TRANS_EVT_DISKSPACE_START:
+        EVT_NAME("diskspace")
+        EVT_STATUS("start")
+        break;
+    case PM_TRANS_EVT_DISKSPACE_DONE:
+        EVT_NAME("diskspace")
+        EVT_STATUS("done")
+        break;
     }
 
 #undef EVT_NAME
@@ -373,6 +380,14 @@ void cb_trans_conv_wrapper ( pmtransconv_t type,
                   convert_packagelist( (alpm_list_t *)PKGLIST ), 0 ); \
     } while ( 0 )
 
+#define EVT_DEPSTR( NAME, DEPPTR )                                      \
+    do {                                                                \
+        hv_store( h_event, NAME, strlen( NAME ),                        \
+                  newSVpv( alpm_dep_compute_string( (pmdepend_t *) DEPPTR ), \
+                           0 ),                                         \
+                  0 );                                                  \
+    } while ( 0 )
+
     hv_store( h_event, "id", 2, newSViv(type), 0 );
     
     switch ( type ) {
@@ -404,6 +419,10 @@ void cb_trans_conv_wrapper ( pmtransconv_t type,
         EVT_NAME( "corrupted_file" );
         EVT_TEXT( "filename", arg_one );
         break;
+    case PM_TRANS_CONV_SELECT_PROVIDER:
+        EVT_NAME( "select_provider" );
+        EVT_PKGLIST( "providers", arg_one );
+        EVT_DEPSTR( "depstr", arg_two );
     }
 
 #undef EVENT
@@ -411,6 +430,7 @@ void cb_trans_conv_wrapper ( pmtransconv_t type,
 #undef EVT_PKG
 #undef EVT_TEXT
 #undef EVT_PKGLIST
+#undef EVT_DEPSTR
 
     PUSHMARK(SP);
     XPUSHs( newRV_noinc( (SV *)h_event ));
@@ -436,7 +456,8 @@ void cb_trans_conv_wrapper ( pmtransconv_t type,
 void cb_trans_progress_wrapper( pmtransprog_t type,
                                 const char * desc,
                                 int item_progress,
-                                int total_count, int total_pos )
+                                size_t total_count,
+                                size_t total_pos )
 {
     HV *h_event;
     dSP;
@@ -467,6 +488,8 @@ void cb_trans_progress_wrapper( pmtransprog_t type,
     case PM_TRANS_PROGRESS_UPGRADE_START:   EVT_NAME( "upgrade"   );
     case PM_TRANS_PROGRESS_REMOVE_START:    EVT_NAME( "remove"    );
     case PM_TRANS_PROGRESS_CONFLICTS_START: EVT_NAME( "conflicts" );
+    case PM_TRANS_PROGRESS_DISKSPACE_START: EVT_NAME( "diskspace" );
+    case PM_TRANS_PROGRESS_INTEGRITY_START: EVT_NAME( "integrity" );
     }
 
     EVT_INT ( "id",          type );

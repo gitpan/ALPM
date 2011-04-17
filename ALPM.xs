@@ -39,6 +39,26 @@ alpm_version ( class )
   OUTPUT:
     RETVAL
 
+ALPM_PackageOrNull
+alpm_find_satisfier ( self, pkglist, depstr )
+    SV * self
+    PackageListFree pkglist
+    const char * depstr
+  CODE:
+    RETVAL = alpm_find_satisfier( pkglist, depstr );
+  OUTPUT:
+    RETVAL
+
+ALPM_PackageOrNull
+alpm_find_dbs_satisfier ( self, dblist, depstr )
+    SV * self
+    DatabaseList dblist
+    const char * depstr
+  CODE:
+    RETVAL = alpm_find_dbs_satisfier( dblist, depstr );
+  OUTPUT:
+    RETVAL
+
 # PRIVATE ###################################################################
  
 MODULE = ALPM    PACKAGE = ALPM    PREFIX=alpm
@@ -55,8 +75,16 @@ alpm_pkg_load ( filename, ... )
   OUTPUT:
     RETVAL
 
-negative_is_error
-alpm_db_unregister_all ()
+# Because this unregisters the local database and there is no
+# longer any way to re-register the local database this
+# function is now even more pointless. Removed until this
+# minor bug is fixed with libalpm.
+#
+# Should be in next pacman release. (currently 3.5.1)
+# falconindy already fixed this! :)
+#
+#negative_is_error
+#alpm_db_unregister_all ()
 
 negative_is_error
 alpm_initialize ()
@@ -69,64 +97,52 @@ alpm_release ()
 #----------------------------------------------------------------------------
 
 # PRIVATE ###################################################################
-# These are used inside ALPM.pm, so they keep their _db prefix.
-
-ALPM_DB
-alpm_db_register_local ()
+# This is used inside ALPM.pm, so it keeps its _db prefix.
 
 ALPM_DB
 alpm_db_register_sync ( sync_name )
     const char * sync_name
 
 # Remove PREFIX
-MODULE = ALPM    PACKAGE = ALPM::DB
+MODULE = ALPM    PACKAGE = ALPM::DB    PREFIX = alpm_db
 
 # We have a wrapper for this because it crashes on local db.
 const char *
-_url ( db )
+alpm_db_get_url ( db )
     ALPM_DB db
-  CODE:
-    RETVAL = alpm_db_get_url( db );
-  OUTPUT:
-    RETVAL
 
 PackageListNoFree
-_get_pkg_cache ( db )
+alpm_db_get_pkgcache ( db )
     ALPM_DB db
-  CODE:
-    RETVAL = alpm_db_get_pkgcache( db );
-  OUTPUT:
-    RETVAL
 
 # Wrapper for this checks if a transaction is active.
+# We have to reverse the arguments because it is a method.
 negative_is_error
-_update( db, level )
+alpm_db_update ( db, force )
     ALPM_DB db
-    int level
+    int force
   CODE:
-    RETVAL = alpm_db_update( level, db );
+    RETVAL = alpm_db_update( force, db );
   OUTPUT:
     RETVAL
 
 GroupList
-_get_group_cache ( db )
+alpm_db_get_grpcache ( db )
     ALPM_DB db
-  CODE:
-    RETVAL = alpm_db_get_grpcache ( db );
-  OUTPUT:
-    RETVAL
 
 # Wrapped to avoid arrayrefs (which are much easier in typemap)
 PackageListFree
-_search( db, needles )
+alpm_db_search( db, needles )
     ALPM_DB db
     StringListFree needles
-  CODE:
-    RETVAL = alpm_db_search( db, needles );
-  OUTPUT:
-    RETVAL
 
 # PUBLIC ####################################################################
+
+MODULE = ALPM   PACKAGE = ALPM::DB    PREFIX = alpm_db_
+
+negative_is_error
+alpm_db_unregister ( self )
+    ALPM_DB self
 
 MODULE = ALPM   PACKAGE = ALPM::DB
 
