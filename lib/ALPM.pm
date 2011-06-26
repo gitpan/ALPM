@@ -15,7 +15,7 @@ use ALPM::Package;
 use ALPM::Group;
 use ALPM::DB;
 
-our $VERSION = '2.00';
+our $VERSION = '2.01';
 
 # constants are only used internally... they are ugly.
 sub AUTOLOAD {
@@ -350,7 +350,11 @@ sub load_pkgfile
     }
 
     my $package_path = shift;
-    return _pkg_load( $package_path );
+    my $pkgobj = eval { _pkg_load( $package_path ) };
+    return $pkgobj unless $@;
+
+    $@ =~ s/ at .*? line \d+[.]\n\z//;
+    croak $@;
 }
 
 sub trans
