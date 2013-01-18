@@ -1,231 +1,237 @@
-#include "alpm_xs.h"
-#include "xs/const-c.inc"
+#include "EXTERN.h"
+#include "perl.h"
+#include "XSUB.h"
+#include "ppport.h"
 
-MODULE = ALPM    PACKAGE = ALPM
+#include <alpm.h>
+#include "types.h"
+#include "cb.h"
+
+#define alpm_croak(HND)\
+	croak("ALPM Error: %s", alpm_strerror(alpm_errno(HND)));
+
+MODULE = ALPM	PACKAGE = ALPM
 
 PROTOTYPES: DISABLE
 
-INCLUDE: xs/const-xs.inc
-
-# Make ALPM::PackageFree a subclass of ALPM::Package
+# ALPM::PackageFree is a subclass of ALPM::Package.
+# ALPM::DB::Sync and ALPM::DB::Local are each subclasses of ALPM::DB.
 BOOT:
-    av_push( get_av( "ALPM::PackageFree::ISA", GV_ADD ),
-             newSVpvn( "ALPM::Package", 13 ) );
+	av_push(get_av("ALPM::PackageFree::ISA", GV_ADD), newSVpv("ALPM::Package", 0));
+	av_push(get_av("ALPM::DB::Sync::ISA", GV_ADD), newSVpv("ALPM::DB", 0));
+	av_push(get_av("ALPM::DB::Local::ISA", GV_ADD), newSVpv("ALPM::DB", 0));
 
-MODULE = ALPM    PACKAGE = ALPM::PackageFree
+MODULE = ALPM	PACKAGE = ALPM::PackageFree
 
-negative_is_error
-DESTROY ( self )
-    ALPM_PackageFree self;
-  CODE:
-#   fprintf( stderr, "DEBUG Freeing memory for ALPM::PackageFree object\n" );
-    RETVAL = alpm_pkg_free( self );
-  OUTPUT:
-    RETVAL
+void
+DESTROY(self)
+	ALPM_PackageFree self;
+ PPCODE:
+	alpm_pkg_free(self);
 
-#----------------------------------------------------------------------------
-# ALPM FUNCTIONS
-#----------------------------------------------------------------------------
+#---------------------
+# PUBLIC ALPM METHODS
+#---------------------
 
-# PUBLIC ####################################################################
+MODULE = ALPM	PACKAGE = ALPM
+
+ALPM_Handle
+new(class, root, dbpath)
+	SV * class
+	char * root
+	char * dbpath
+ PREINIT:
+	enum _alpm_errno_t err;
+	ALPM_Handle h;
+ CODE:
+	h = alpm_initialize(root, dbpath, &err);
+	if(h == NULL){
+		croak("ALPM Error: %s", alpm_strerror(err));
+	}
+	RETVAL = h;
+ OUTPUT:
+	RETVAL
+
+void
+DESTROY(self)
+	ALPM_Handle self;
+ PREINIT:
+	int ret;
+ CODE:
+	ret = alpm_release(self);
+	if(ret == -1){
+		croak("ALPM Error: failed to release ALPM handle");
+	}
+	# errno is only inside a handle, which was just released...
+
+MODULE = ALPM    PACKAGE = ALPM
+
+void
+caps(class)
+	SV * class
+ PREINIT:
+	enum alpm_caps c;
+ PPCODE:
+	c = alpm_capabilities();
+	if(c & ALPM_CAPABILITY_NLS){
+		XPUSHs(sv_2mortal(newSVpv("nls", 0)));
+	}	
+	if(c & ALPM_CAPABILITY_DOWNLOADER){
+		XPUSHs(sv_2mortal(newSVpv("download", 0)));
+	}
+	if(c & ALPM_CAPABILITY_SIGNATURES){
+		XPUSHs(sv_2mortal(newSVpv("signatures", 0)));
+	}
 
 MODULE = ALPM    PACKAGE = ALPM    PREFIX=alpm_
 
 const char *
-alpm_version ( class )
-    SV * class
-  CODE:
-    RETVAL = alpm_version( );
-  OUTPUT:
-    RETVAL
-
-ALPM_PackageOrNull
-alpm_find_satisfier ( self, pkglist, depstr )
-    SV * self
-    PackageListFree pkglist
-    const char * depstr
-  CODE:
-    RETVAL = alpm_find_satisfier( pkglist, depstr );
-  OUTPUT:
-    RETVAL
-
-ALPM_PackageOrNull
-alpm_find_dbs_satisfier ( self, dblist, depstr )
-    SV * self
-    DatabaseList dblist
-    const char * depstr
-  CODE:
-    RETVAL = alpm_find_dbs_satisfier( dblist, depstr );
-  OUTPUT:
-    RETVAL
-
-# PRIVATE ###################################################################
- 
-MODULE = ALPM    PACKAGE = ALPM    PREFIX=alpm
-
-ALPM_PackageFree
-alpm_pkg_load ( filename, ... )
-    const char *filename
-  PREINIT:
-    pmpkg_t *pkg;
-  CODE:
-    if ( alpm_pkg_load( filename, 1, &pkg ) != 0 )
-        croak( "ALPM Error: %s", alpm_strerror( pm_errno ));
-    RETVAL = pkg;
-  OUTPUT:
-    RETVAL
-
-# Because this unregisters the local database and there is no
-# longer any way to re-register the local database this
-# function is now even more pointless. Removed until this
-# minor bug is fixed with libalpm.
-#
-# Should be in next pacman release. (currently 3.5.1)
-# falconindy already fixed this! :)
-#
-#negative_is_error
-#alpm_db_unregister_all ()
-
-negative_is_error
-alpm_initialize ()
-
-negative_is_error
-alpm_release ()
-
-#----------------------------------------------------------------------------
-# DATABASE FUNCTIONS
-#----------------------------------------------------------------------------
-
-# PRIVATE ###################################################################
-# This is used inside ALPM.pm, so it keeps its _db prefix.
-
-ALPM_DB
-alpm_db_register_sync ( sync_name )
-    const char * sync_name
-
-# Remove PREFIX
-MODULE = ALPM    PACKAGE = ALPM::DB    PREFIX = alpm_db
-
-# We have a wrapper for this because it crashes on local db.
-const char *
-alpm_db_get_url ( db )
-    ALPM_DB db
-
-PackageListNoFree
-alpm_db_get_pkgcache ( db )
-    ALPM_DB db
-
-# Wrapper for this checks if a transaction is active.
-# We have to reverse the arguments because it is a method.
-negative_is_error
-alpm_db_update ( db, force )
-    ALPM_DB db
-    int force
-  CODE:
-    RETVAL = alpm_db_update( force, db );
-  OUTPUT:
-    RETVAL
-
-GroupList
-alpm_db_get_grpcache ( db )
-    ALPM_DB db
-
-# Wrapped to avoid arrayrefs (which are much easier in typemap)
-PackageListFree
-alpm_db_search( db, needles )
-    ALPM_DB db
-    StringListFree needles
-
-# PUBLIC ####################################################################
-
-MODULE = ALPM   PACKAGE = ALPM::DB    PREFIX = alpm_db_
-
-negative_is_error
-alpm_db_unregister ( self )
-    ALPM_DB self
-
-MODULE = ALPM   PACKAGE = ALPM::DB
+alpm_version(class)
+	SV * class
+ CODE:
+	RETVAL = alpm_version();
+ OUTPUT:
+	RETVAL
 
 const char *
-name ( db )
-    ALPM_DB db
-  CODE:
-    RETVAL = alpm_db_get_name( db );
-  OUTPUT:
-    RETVAL
+alpm_strerror(self)
+	ALPM_Handle self;
+ CODE:
+	RETVAL = alpm_strerror(alpm_errno(self));
+ OUTPUT:
+	RETVAL
 
-negative_is_error
-add_url ( db, url )
-    ALPM_DB db
-    const char * url
-  CODE:
-    RETVAL = alpm_db_setserver( db, url );
-  OUTPUT:
-    RETVAL
+int
+alpm_errno(self)
+	ALPM_Handle self
+
+ALPM_Package
+alpm_find_satisfier(self, depstr, ...)
+	SV * self
+	const char * depstr
+ PREINIT:
+	alpm_list_t *pkgs;
+	int i;
+ CODE:
+	i = 0;
+	STACK2LIST(i, pkgs, p2c_pkg);
+	RETVAL = alpm_find_satisfier(pkgs, depstr);
+	alpm_list_free(pkgs);
+ OUTPUT:
+	RETVAL
+
+ALPM_Package
+alpm_find_dbs_satisfier(self, depstr, ...)
+	ALPM_Handle self
+	const char * depstr
+ PREINIT:
+	alpm_list_t *dbs;
+	int i;
+ CODE:
+	i = 0;
+	STACK2LIST(i, dbs, p2c_db);
+	RETVAL = alpm_find_dbs_satisfier(self, dbs, depstr);
+	alpm_list_free(dbs);
+ OUTPUT:
+	RETVAL
+
+void
+alpm_check_conflicts(self, ...)
+	ALPM_Handle self
+ PREINIT:
+	alpm_list_t *L, *clist;
+	int i;
+ PPCODE:
+	i = 1;
+	STACK2LIST(i, L, p2c_pkg);
+	L = clist = alpm_checkconflicts(self, L);
+	LIST2STACK(clist, c2p_conflict);
+	ZAPLIST(L, freeconflict);
 
 SV *
-find ( db, name )
-    ALPM_DB db
-    const char *name
-  PREINIT:
-    pmpkg_t *pkg;
-  CODE:
-    pkg = alpm_db_get_pkg( db, name );
-    if ( pkg == NULL ) RETVAL = &PL_sv_undef;
-    else {
-        RETVAL = newSV( 0 );
-        sv_setref_pv( RETVAL, "ALPM::Package", (void *)pkg );
-    }
-  OUTPUT:
-    RETVAL
+alpm_fetch_pkgurl(self, url)
+	ALPM_Handle self
+	const char * url
+ PREINIT:
+	char * path;
+ CODE:
+	path = alpm_fetch_pkgurl(self, url);
+	if(path == NULL){
+		RETVAL = &PL_sv_undef;
+	}else{
+		RETVAL = sv_2mortal(newSVpv(path, strlen(path)));
+	}
+ OUTPUT:
+	RETVAL
 
-ALPM_Group
-find_group ( db, name )
-    ALPM_DB db
-    const char * name
-  CODE:
-    RETVAL = alpm_db_readgrp( db, name );
-  OUTPUT:
-    RETVAL
+MODULE = ALPM	PACKAGE = ALPM	PREFIX = alpm_db_
+
+# Why name this register_sync when there is no register_local? Redundant.
+
+ALPM_SyncDB
+alpm_db_register(self, name, ...)
+	ALPM_Handle self
+	const char * name
+ PREINIT:
+	alpm_siglevel_t siglvl;
+ CODE:
+	if(items >= 3){
+		siglvl = p2c_siglevel(ST(2));
+	}else{
+		siglvl = ALPM_SIG_USE_DEFAULT;
+	}
+	RETVAL = alpm_db_register_sync(self, name, siglvl);
+ OUTPUT:
+	RETVAL
 
 negative_is_error
-set_pkg_reason ( self, pkgname, pkgreason )
-    ALPM_DB       self
-    char        * pkgname
-    pmpkgreason_t pkgreason
-  CODE:
-    RETVAL = alpm_db_set_pkgreason( self, pkgname, pkgreason );
-  OUTPUT:
-    RETVAL
+alpm_db_unregister_all(self)
+	ALPM_Handle self
 
-#-----------------------------------------------------------------------------
-# PACKAGE GROUPS
-#-----------------------------------------------------------------------------
+MODULE = ALPM	PACKAGE = ALPM
 
-# PUBLIC ####################################################################
+# Packages created with load_pkgfile must be freed by the caller.
+# Hence we use ALPM_PackageFree. NULL pointers are converted
+# into undef by the typemap.
 
-MODULE=ALPM    PACKAGE=ALPM::Group
+ALPM_PackageFree
+load_pkgfile(self, filename, full, siglevel)
+	ALPM_Handle self
+	const char *filename
+	int full
+	ALPM_SigLevel siglevel
+ CODE:
+	RETVAL = NULL;
+	alpm_pkg_load(self, filename, full, siglevel, &RETVAL);
+ OUTPUT:
+	RETVAL
 
-const char *
-name ( grp )
-    ALPM_Group grp
-  CODE:
-    RETVAL = alpm_grp_get_name( grp );
-  OUTPUT:
-    RETVAL
+int
+vercmp(unused, a, b)
+	SV * unused
+	const char *a
+	const char *b
+ CODE:
+	RETVAL = alpm_pkg_vercmp(a, b);
+ OUTPUT:
+	RETVAL
 
-# PRIVATE ###################################################################
-
-MODULE=ALPM    PACKAGE=ALPM::Group    PREFIX=alpm_grp
-
-PackageListNoFree
-alpm_grp_get_pkgs ( grp )
-    ALPM_Group grp
+negative_is_error
+set_pkg_reason(self, pkg, rsn)
+	ALPM_Handle self
+	ALPM_Package pkg
+	alpm_pkgreason_t rsn
+ CODE:
+	RETVAL = alpm_db_set_pkgreason(self, pkg, rsn);
+ OUTPUT:
+	RETVAL
 
 INCLUDE: xs/Options.xs
 
 INCLUDE: xs/Package.xs
 
-INCLUDE: xs/Transaction.xs
+INCLUDE: xs/DB.xs
+
+# INCLUDE: xs/Transaction.xs
 
 # EOF

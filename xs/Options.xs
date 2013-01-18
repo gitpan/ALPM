@@ -1,159 +1,286 @@
-MODULE = ALPM    PACKAGE = ALPM
+MODULE = ALPM	PACKAGE = ALPM
 
-#############################################################################
 ## CALLBACKS
 
-SV *
-alpm_option_get_logcb()
-  CODE:
-    DEF_GET_CALLBACK( log )
-  OUTPUT:
-    RETVAL
+SV*
+get_logcb(...)
+ CODE:
+	RETVAL = (logcb_ref ? newSVsv(logcb_ref) : &PL_sv_undef);
+ OUTPUT:
+	RETVAL
+
+SV*
+get_dlcb(...)
+ CODE:
+	RETVAL = (dlcb_ref ? newSVsv(dlcb_ref) : &PL_sv_undef);
+ OUTPUT:
+	RETVAL
+
+SV*
+get_fetchcb(...)
+ CODE:
+	RETVAL = (fetchcb_ref ? newSVsv(fetchcb_ref) : &PL_sv_undef);
+ OUTPUT:
+	RETVAL
+
+SV*
+get_totaldlcb(...)
+ CODE:
+	RETVAL = (totaldlcb_ref ? newSVsv(totaldlcb_ref) : &PL_sv_undef);
+ OUTPUT:
+	RETVAL
+
+MODULE = ALPM	PACKAGE = ALPM	PREFIX = alpm_option_
 
 void
-alpm_option_set_logcb ( callback )
-    SV * callback
-  CODE:
-    DEF_SET_CALLBACK( log )
-
-SV *
-alpm_option_get_dlcb()
-  CODE:
-    DEF_GET_CALLBACK( dl )
-  OUTPUT:
-    RETVAL
+alpm_option_set_logcb(self, cb)
+	ALPM_Handle self
+	SV * cb
+ CODE:
+	DEFSETCB(log, self, cb)
 
 void
-alpm_option_set_dlcb(callback)
-    SV * callback
-  CODE:
-    DEF_SET_CALLBACK( dl )
-
-SV *
-alpm_option_get_totaldlcb()
-  CODE:
-    DEF_GET_CALLBACK( totaldl )
-  OUTPUT:
-    RETVAL
+alpm_option_set_dlcb(self, cb)
+	ALPM_Handle self
+	SV * cb
+ CODE:
+	DEFSETCB(dl, self, cb)
 
 void
-alpm_option_set_totaldlcb(callback)
-    SV * callback
-  CODE:
-    DEF_SET_CALLBACK( totaldl )
-
-SV *
-alpm_option_get_fetchcb()
-  CODE:
-    DEF_GET_CALLBACK( fetch )
-  OUTPUT:
-    RETVAL
+alpm_option_set_fetchcb(self, cb)
+	ALPM_Handle self
+	SV * cb
+ CODE:
+	DEFSETCB(fetch, self, cb)
 
 void
-alpm_option_set_fetchcb(callback)
-    SV * callback
-  CODE:
-    DEF_SET_CALLBACK( fetch )
+alpm_option_set_totaldlcb(self, cb)
+	ALPM_Handle self
+	SV * cb
+ CODE:
+	DEFSETCB(totaldl, self, cb)
 
-#############################################################################
+## REGULAR OPTIONS
 
-const char *
-option_string_get ( )
+StringOption
+option_string_get(self)
+	ALPM_Handle self
+ INTERFACE:
+	alpm_option_get_logfile
+	alpm_option_get_lockfile
+	alpm_option_get_arch
+	alpm_option_get_gpgdir
+
+SetOption
+option_string_set(self, string)
+	ALPM_Handle self
+	const char * string
+ INTERFACE:
+	alpm_option_set_logfile
+	alpm_option_set_arch
+	alpm_option_set_gpgdir
+
+# String List Options
+
+void
+alpm_option_get_cachedirs(self)
+	ALPM_Handle self
+ PREINIT:
+	alpm_list_t *lst;
+ PPCODE:
+	lst = alpm_option_get_cachedirs(self);
+	LIST2STACK(lst, c2p_str);
+
+void
+alpm_option_get_noupgrades(self)
+	ALPM_Handle self
+ PREINIT:
+	alpm_list_t *lst;
+ PPCODE:
+	lst = alpm_option_get_noupgrades(self);
+	LIST2STACK(lst, c2p_str);
+
+void
+alpm_option_get_noextracts(self)
+	ALPM_Handle self
+ PREINIT:
+	alpm_list_t *lst;
+ PPCODE:
+	lst = alpm_option_get_noextracts(self);
+	LIST2STACK(lst, c2p_str);
+
+void
+alpm_option_get_ignorepkgs(self)
+	ALPM_Handle self
+ PREINIT:
+	alpm_list_t *lst;
+ PPCODE:
+	lst = alpm_option_get_ignorepkgs(self);
+	LIST2STACK(lst, c2p_str);
+
+void
+alpm_option_get_ignoregroups(self)
+	ALPM_Handle self
+ PREINIT:
+	alpm_list_t *lst;
+ PPCODE:
+	lst = alpm_option_get_ignoregroups(self);
+	LIST2STACK(lst, c2p_str);
+
+SetOption
+option_stringlist_add(self, add_string)
+	ALPM_Handle self
+	const char *add_string
+ INTERFACE:
+	alpm_option_add_noupgrade
+	alpm_option_add_noextract
+	alpm_option_add_ignorepkg
+	alpm_option_add_ignoregroup
+	alpm_option_add_cachedir
+
+SetOption
+alpm_option_set_cachedirs(self, ...)
+	ALPM_Handle self
+ PREINIT:
+	alpm_list_t *lst;
+	int i;
+ CODE:
+	i = 1;
+	STACK2LIST(i, lst, p2c_str);
+	RETVAL = alpm_option_set_cachedirs(self, lst);
+	ZAPLIST(lst, free);
+ OUTPUT:
+	RETVAL
+
+SetOption
+alpm_option_set_noupgrades(self, ...)
+	ALPM_Handle self
+ PREINIT:
+	alpm_list_t *lst;
+	int i;
+ CODE:
+	i = 1;
+	STACK2LIST(i, lst, p2c_str);
+	RETVAL = alpm_option_set_noupgrades(self, lst);
+	ZAPLIST(lst, free);
+ OUTPUT:
+	RETVAL
+
+SetOption
+alpm_option_set_noextracts(self, ...)
+	ALPM_Handle self
+ PREINIT:
+	alpm_list_t *lst;
+	int i;
+ CODE:
+	i = 1;
+	STACK2LIST(i, lst, p2c_str);
+	RETVAL = alpm_option_set_noextracts(self, lst);
+	ZAPLIST(lst, free);
+ OUTPUT:
+	RETVAL
+
+SetOption
+alpm_option_set_ignorepkgs(self, ...)
+	ALPM_Handle self
+ PREINIT:
+	alpm_list_t *lst;
+	int i;
+ CODE:
+	i = 1;
+	STACK2LIST(i, lst, p2c_str);
+	RETVAL = alpm_option_set_ignorepkgs(self, lst);
+	ZAPLIST(lst, free);
+ OUTPUT:
+	RETVAL
+
+SetOption
+alpm_option_set_ignoregroups(self, ...)
+	ALPM_Handle self
+ PREINIT:
+	alpm_list_t *lst;
+	int i;
+ CODE:
+	i = 1;
+	STACK2LIST(i, lst, p2c_str);
+	RETVAL = alpm_option_set_ignoregroups(self, lst);
+	ZAPLIST(lst, free);
+ OUTPUT:
+	RETVAL
+
+# Use IntOption to return the number of items removed (0 or 1).
+
+IntOption
+option_stringlist_remove(self, badstring)
+	ALPM_Handle self
+	const char * badstring
 INTERFACE:
-    alpm_option_get_root
-    alpm_option_get_dbpath
-    alpm_option_get_cachedirs
-    alpm_option_get_logfile
-    alpm_option_get_lockfile
-    alpm_option_get_arch
+	alpm_option_remove_cachedir
+	alpm_option_remove_noupgrade
+	alpm_option_remove_noextract
+	alpm_option_remove_ignorepkg
+	alpm_option_remove_ignoregroup
 
-negative_is_error
-option_string_set ( string )
-    const char * string
+IntOption
+option_int_get(self)
+	ALPM_Handle self
 INTERFACE:
-    alpm_option_set_root
-    alpm_option_set_dbpath
-    alpm_option_set_cachedirs
-    alpm_option_set_logfile
+	alpm_option_get_usesyslog
+	alpm_option_get_usedelta
+	alpm_option_get_checkspace
 
-# the set_arch function has a void return type! we can't use it above
+SetOption
+option_int_set(self, new_int)
+	ALPM_Handle self
+	int new_int
+INTERFACE:
+	alpm_option_set_usesyslog
+	alpm_option_set_usedelta
+	alpm_option_set_checkspace
+
+# Why have get_localdb when there is no set_localdb? s/get_//;
+
+ALPM_LocalDB
+alpm_option_localdb(self)
+	ALPM_Handle self
+ CODE:
+	RETVAL = alpm_option_get_localdb(self);
+ OUTPUT:
+	RETVAL
+
+# Ditto.
 
 void
-alpm_option_set_arch ( new_arch )
-    const char * new_arch
+alpm_option_syncdbs(self)
+	ALPM_Handle self
+ PREINIT:
+	alpm_list_t *lst;
+ PPCODE:
+	lst = alpm_option_get_syncdbs(self);
+	if(lst == NULL && alpm_errno(self)) alpm_croak(self);
+	LIST2STACK(lst, c2p_syncdb);
 
-StringListNoFree
-option_stringlist_get ( )
-INTERFACE:
-    alpm_option_get_cachedirs
-    alpm_option_get_noupgrades
-    alpm_option_get_noextracts
-    alpm_option_get_ignorepkgs
-    alpm_option_get_ignoregrps
+MODULE = ALPM	PACKAGE = ALPM	PREFIX = alpm_option_
 
-void
-option_stringlist_add ( add_string )
-    const char * add_string
-INTERFACE:
-    alpm_option_add_noupgrade
-    alpm_option_add_noextract
-    alpm_option_add_ignorepkg
-    alpm_option_add_ignoregrp
+ALPM_SigLevel
+get_defsiglvl(self)
+	ALPM_Handle self
+ CODE:
+	RETVAL = alpm_option_get_default_siglevel(self);
+ OUTPUT:
+	RETVAL
 
-# add_cachedir is the only add_ func that doesn't return void
-negative_is_error
-alpm_option_add_cachedir ( new_cachedir )
-    const char * new_cachedir
-
-void
-option_stringlist_set ( stringlist )
-    StringListNoFree stringlist
-INTERFACE:
-    alpm_option_set_cachedirs
-    alpm_option_set_noupgrades
-    alpm_option_set_noextracts
-    alpm_option_set_ignorepkgs
-    alpm_option_set_ignoregrps
-
-void
-option_stringlist_remove ( badstring )
-    const char * badstring
-INTERFACE:
-    alpm_option_remove_cachedir
-    alpm_option_remove_noupgrade
-    alpm_option_remove_noextract
-    alpm_option_remove_ignorepkg
-    alpm_option_remove_ignoregrp
-
-int
-option_int_get ( )
-INTERFACE:
-    alpm_option_get_usesyslog
-    alpm_option_get_usedelta
-
-void
-option_int_set ( new_int )
-    int new_int
-INTERFACE:
-    alpm_option_set_usesyslog
-    alpm_option_set_usedelta
-
-SV *
-alpm_option_get_localdb()
-  PREINIT:
-    pmdb_t *db;
-  CODE:
-    db = alpm_option_get_localdb();
-    if ( db == NULL )
-        RETVAL = &PL_sv_undef;
-    else {
-        RETVAL = newSV(0);
-        sv_setref_pv( RETVAL, "ALPM::DB", (void *)db );
-    }
-  OUTPUT:
-    RETVAL
-
-DatabaseList
-alpm_option_get_syncdbs()
+SetOption
+set_defsiglvl(self, siglvl)
+	ALPM_Handle self
+	SV* siglvl
+ CODE:
+	if(strcmp(SvPV_nolen(siglvl), "default") == 0){
+		croak("Default signature level cannot itself be set to default. You hear the sound of one hand clapping");
+	}else{
+		RETVAL = alpm_option_set_default_siglevel(self, p2c_siglevel(siglvl));
+	}
+ OUTPUT:
+	RETVAL
 
 # EOF
