@@ -41,7 +41,7 @@ new(class, root, dbpath)
 	char * root
 	char * dbpath
  PREINIT:
-	enum _alpm_errno_t err;
+	alpm_errno_t err;
 	ALPM_Handle h;
  CODE:
 	h = alpm_initialize(root, dbpath, &err);
@@ -164,12 +164,13 @@ alpm_fetch_pkgurl(self, url)
  OUTPUT:
 	RETVAL
 
-MODULE = ALPM	PACKAGE = ALPM	PREFIX = alpm_db_
+
+MODULE = ALPM	PACKAGE = ALPM
 
 # Why name this register_sync when there is no register_local? Redundant.
 
 ALPM_SyncDB
-alpm_db_register(self, name, ...)
+register(self, name, ...)
 	ALPM_Handle self
 	const char * name
  PREINIT:
@@ -180,15 +181,17 @@ alpm_db_register(self, name, ...)
 	}else{
 		siglvl = ALPM_SIG_USE_DEFAULT;
 	}
-	RETVAL = alpm_db_register_sync(self, name, siglvl);
+	RETVAL = alpm_register_syncdb(self, name, siglvl);
  OUTPUT:
 	RETVAL
 
 negative_is_error
-alpm_db_unregister_all(self)
+unregister_all(self)
 	ALPM_Handle self
-
-MODULE = ALPM	PACKAGE = ALPM
+ CODE:
+	RETVAL = alpm_unregister_all_syncdbs(self);
+ OUTPUT:
+	RETVAL
 
 # Packages created with load_pkgfile must be freed by the caller.
 # Hence we use ALPM_PackageFree. NULL pointers are converted
@@ -213,16 +216,6 @@ vercmp(unused, a, b)
 	const char *b
  CODE:
 	RETVAL = alpm_pkg_vercmp(a, b);
- OUTPUT:
-	RETVAL
-
-negative_is_error
-set_pkg_reason(self, pkg, rsn)
-	ALPM_Handle self
-	ALPM_Package pkg
-	alpm_pkgreason_t rsn
- CODE:
-	RETVAL = alpm_db_set_pkgreason(self, pkg, rsn);
  OUTPUT:
 	RETVAL
 

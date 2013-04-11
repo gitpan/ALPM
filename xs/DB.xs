@@ -62,7 +62,7 @@ find_group(db, name)
 	alpm_group_t *grp;
 	alpm_list_t *pkgs;
  PPCODE:
-	grp = alpm_db_readgroup(db, name);
+	grp = alpm_db_get_group(db, name);
 	if(grp){
 		pkgs = grp->packages;
 		LIST2STACK(pkgs, c2p_pkg);
@@ -81,6 +81,22 @@ search(db, ...)
 	ZAPLIST(terms, free);
 	LIST2STACK(fnd, c2p_pkg);
 	alpm_list_free(L);
+
+#-----------------------------
+# PUBLIC LOCAL DATABASE METHODS
+#-----------------------------
+
+MODULE = ALPM   PACKAGE = ALPM::DB::Local
+
+negative_is_error
+set_install_reason(self, pkg, rsn)
+	ALPM_LocalDB self
+	ALPM_Package pkg
+	alpm_pkgreason_t rsn
+ CODE:
+	RETVAL = alpm_pkg_set_reason(pkg, rsn);
+ OUTPUT:
+	RETVAL
 
 #-----------------------------
 # PUBLIC SYNC DATABASE METHODS

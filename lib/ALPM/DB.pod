@@ -1,6 +1,6 @@
 =head1 NAME
 
-ALPM::DB - Database base class class.
+ALPM::DB - Database base class, inherited by local and sync databases.
 
 =head1 SYNOPSIS
 
@@ -9,17 +9,17 @@ ALPM::DB - Database base class class.
   printf "Playing with %s database\n", $db->name;
   my $perl = $db->find('perl') or die 'where is perl';
   
-  my $url = 'ftp://ftp.archlinux.org/community/os/i686';
-  $db = $alpm->register('community' => $url) or die 'register failed';
+  $db = $alpm->register('community') or die;
+  $db->add_mirror('ftp://ftp.archlinux.org/community/os/i686') or die;
   
-  for my $pkg ($db->search( 'perl' )){
+  for my $pkg ($db->search('perl')){
       printf "%s\t%s\n", $pkg->name, $pkg->version;
   }
   
   for my $pkg ($db->find_group('xfce4')){
       printf "xfce4:\t%s\t%s\n", $pkg->name, $pkg->version;
   }
-
+  
   my %grps = $db->groups;
   while(my($g, $pkgs) = each %grps){
       printf "%s\t%s\n", $g, $_->name for(@$pkgs);
@@ -120,7 +120,7 @@ found then this is empty.
 
 =head1 SEE ALSO
 
-L<ALPM::DB::Sync>, L<ALPM::Package>, L<ALPM>
+L<ALPM::DB::Local>, L<ALPM::DB::Sync>, L<ALPM::Package>, L<ALPM>
 
 =head1 AUTHOR
 

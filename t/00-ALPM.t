@@ -35,7 +35,7 @@ ok $alpm->version; # just checks it works
 	'ignorepkgs' => [ 'baz' ],
 	'ignoregroups' => [ 'core' ],
 	'usesyslog' => 0,
-	'usedelta' => 0,
+	'deltaratio' => 0.5,
 	'checkspace' => 1,
 );
 
@@ -77,12 +77,10 @@ if(grep { /signatures/ } @caps){
 	ok $alpm->set_defsiglvl($siglvl);
 	is_deeply $alpm->get_defsiglvl, $siglvl;
 }else{
-	ok $alpm->set_defsiglvl({ 'pkg' => 'required', 'db' => 'required' });
-	is_deeply $alpm->get_defsiglvl, { 'pkg' => 'never', 'db' => 'never' };
 	$siglvl = { 'pkg' => 'never', 'db' => 'required' };
 	eval { $alpm->set_defsiglvl($siglvl); };
 	if($@ =~ /^ALPM Error: wrong or NULL argument passed/){
-		pass q{can set siglevel to "default" or "never" without GPGME};
+		pass q{can set siglevel to "never" without GPGME};
 	}else{
 		fail 'should not be able to set complicated siglevel without GPGME';
 	}

@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <string.h>
 #include <alpm.h>
 
 /* Perl API headers. */
@@ -102,6 +103,7 @@ c2p_depend(void *p)
 	hv_store(hv, "name", 4, newSVpv(dep->name, 0), 0);
 	hv_store(hv, "version", 7, newSVpv(dep->version, 0), 0);
 	hv_store(hv, "mod", 3, c2p_depmod(dep->mod), 0);
+	if(dep->desc) hv_store(hv, "desc", 4, newSVpv(dep->desc, 0), 0);
 	return newRV_noinc((SV*)hv);
 }
 
@@ -217,7 +219,7 @@ trustmask(char *str, STRLEN len)
 {
 	unsigned long flags;
 
-	if(len == 5 && strcmp(str, "never") == 0){
+	if(len == 5 && strncmp(str, "never", 5) == 0){
 		return 0;
 	}
 
@@ -232,8 +234,9 @@ trustmask(char *str, STRLEN len)
 	}
 
 	if(len == 8){
+		/* Conveniently, the strings "required" and "optional" are both 8 characters long. */
 		return flags;
-	}else if(len != 17 || strcmp(str + 8, " trustall") != 0){
+	}else if(len != 17 || strncmp(str + 8, " trustall", 8) != 0){
 		goto badstr;
 	}
 	return flags | MASK_TRUSTALL;
@@ -327,6 +330,40 @@ p2c_pkgreason(SV *sv)
 	}else{
 		croak("reasons can only be integers or strings");
 	}
+}
+
+SV *
+c2p_pkgfrom(alpm_pkgfrom_t from)
+{
+	char *str;
+
+	switch(from){
+	case ALPM_PKG_FROM_FILE: str = "file"; break;
+	case ALPM_PKG_FROM_LOCALDB: str = "localdb"; break;
+	case ALPM_PKG_FROM_SYNCDB: str = "syncdb"; break;
+	default: str = "unknown"; break;
+	}
+
+	return newSVpv(str, 0);
+}
+
+SV *
+c2p_pkgvalidation(alpm_pkgvalidation_t v)
+{
+	char buf[128] = "";
+	int len;
+
+	if(v == ALPM_PKG_VALIDATION_UNKNOWN) goto unknown;
+	if(v & ALPM_PKG_VALIDATION_NONE) strcat(buf, "none ");
+	if(v & ALPM_PKG_VALIDATION_MD5SUM) strcat(buf, "MD5 ");
+	if(v & ALPM_PKG_VALIDATION_SHA256SUM) strcat(buf, "SHA ");
+	if(v & ALPM_PKG_VALIDATION_SIGNATURE) strcat(buf, "PGP ");
+
+	if((len = strlen(buf)) == 0) goto unknown;
+	return newSVpv(buf, len-1);
+
+unknown:
+	return newSVpv("unknown", 0);
 }
 
 /* LIST CONVERSIONS */

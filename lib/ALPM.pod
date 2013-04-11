@@ -338,28 +338,6 @@ L<ALPM::DB::Sync> objects, they will probable cause a segfault...
 
 Returns 1 on success or undef on error. Check L</strerror> on error.
 
-=head2 set_pkg_reason
-
-  1 | undef = $OBJ->set_pkg_reason($PKG, $REASON)
-
-Set a local package installation reason. Returns 1 on success, undef on error.
-Check L</strerror> on error. This would make more sense as an L<ALPM::DB::Local>
-object method, but instead we match the I<alpm_db_set_pkgreason> C function
-in spirit.
-
-=over 4
-
-=item $PKG
-
-An L<ALPM::Package> object. I assume this must be a package retrieved
-from the localdb.
-
-=item $REASON
-
-Must be either C<"explicit"> or C<"implicit"/"depend">.
-
-=back
-
 =head1 ALPM OPTIONS
 
 ALPM has a number of options corresponding to the
@@ -390,7 +368,7 @@ Similarly the same options return a list.
 
 =item B<usesyslog> - if true, log to the system log as well
 
-=item B<usedelta>+ - should you use deltas? not really sure, never tried it...
+=item B<deltaratio> - accepts a decimal from 0 to 1
 
 =item B<checkspace> - check for available diskspace
 
@@ -409,7 +387,6 @@ You're welcome.
 =back
 
   * = the option is set with (and gets you) a list
-  + = the option is boolean and is either 0 or 1
 
 =head2 Callback options
 
@@ -459,6 +436,10 @@ A version string, which can be empty.
 A boolean operator used to compare package versions to our dependency
 version, must be either an empty string (which allows any version), =, >=,
 <=, >, <, or ? if an internal error occurred.
+
+=item desc
+
+If the dependency is optional this key gives a description of the dependency. This key does not exist on a regular dependency.
 
 =back
 
