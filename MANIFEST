@@ -31,6 +31,7 @@ t/repos/package.pl
 t/preptests.pl
 lib/ALPM/Conf.pm
 lib/ALPM/Conf.pod
+lib/ALPM/DB/Local.pod
 lib/ALPM/DB/Sync.pod
 lib/ALPM/DB.pod
 lib/ALPM/Package.pod
@@ -42,5 +43,3 @@ ex/lspkg
 xs/Options.xs
 xs/Package.xs
 xs/DB.xs
-META.yml                                 Module YAML meta-data (added by MakeMaker)
-META.json                                Module JSON meta-data (added by MakeMaker)
